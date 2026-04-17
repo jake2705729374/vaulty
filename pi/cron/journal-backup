@@ -1,0 +1,14 @@
+# Journal App — nightly backup cron job
+# Drop this file in /etc/cron.d/journal-backup (owned root:root, chmod 644)
+#
+# Runs backup at 2:00 AM, verifies at 2:30 AM.
+# Logs go to /var/log/journal-backup.log
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# Run backup nightly at 2:00 AM
+0 2 * * * pi /home/pi/journal-backup/scripts/backup.sh >> /var/log/journal-backup.log 2>&1
+
+# Verify backup at 2:30 AM (after backup completes)
+30 2 * * * pi /home/pi/journal-backup/scripts/verify.sh >> /var/log/journal-backup.log 2>&1
