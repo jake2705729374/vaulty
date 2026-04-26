@@ -83,14 +83,20 @@ function IconCheck({ className = "w-4 h-4", style }: { className?: string; style
 }
 
 // ── Helper functions ───────────────────────────────────────────────────────
-const today = new Date().toISOString().slice(0, 10)
+
+// Use local date (not UTC) so habits reset at local midnight, not UTC midnight
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+const today = localIso(new Date())
 
 function getStreak(logs: HabitLog[]): number {
   const logSet = new Set(logs.map(l => l.date))
   let streak = 0
   const d = new Date()
   while (true) {
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = localIso(d)
     if (!logSet.has(dateStr)) break
     streak++
     d.setDate(d.getDate() - 1)
@@ -102,7 +108,7 @@ function getLast30Days(): string[] {
   return Array.from({ length: 30 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() - (29 - i))
-    return d.toISOString().slice(0, 10)
+    return localIso(d)
   })
 }
 
@@ -110,7 +116,7 @@ function getLast7Days(): string[] {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() - (6 - i))
-    return d.toISOString().slice(0, 10)
+    return localIso(d)
   })
 }
 

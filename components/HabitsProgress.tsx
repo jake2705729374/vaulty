@@ -16,14 +16,20 @@ export interface Habit {
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────────
+
+// Use local date (not UTC) so habits reset at local midnight, not UTC midnight
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localIso(new Date())
 }
 
 function dateStrFromOffset(offsetDays: number): string {
   const d = new Date()
   d.setDate(d.getDate() + offsetDays)
-  return d.toISOString().slice(0, 10)
+  return localIso(d)
 }
 
 function formatDateLabel(dateStr: string): string {
@@ -51,10 +57,9 @@ function isoDow(dateStr: string): number {
 function getCurrentStreak(logs: HabitLog[]): number {
   const logSet = new Set(logs.map(l => l.date))
   let streak = 0
-  const today = todayStr()
-  const d = new Date(today + "T00:00:00")
+  const d = new Date()
   while (true) {
-    const ds = d.toISOString().slice(0, 10)
+    const ds = localIso(d)
     if (!logSet.has(ds)) break
     streak++
     d.setDate(d.getDate() - 1)
@@ -248,7 +253,7 @@ function Chart2WeeklyComparison({ habits }: { habits: Habit[] }) {
   const lastWeekDays = thisWeekDays.map(ds => {
     const d = new Date(ds + "T00:00:00")
     d.setDate(d.getDate() - 7)
-    return d.toISOString().slice(0, 10)
+    return localIso(d)
   })
 
   const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -406,7 +411,7 @@ function Chart3Heatmap({ habits }: { habits: Habit[] }) {
   const gridStartDate = (() => {
     const d = new Date(gridEndDate + "T00:00:00")
     d.setDate(d.getDate() - 13 * 7 + 1)
-    return d.toISOString().slice(0, 10)
+    return localIso(d)
   })()
 
   // Build cell array: [col 0..12][row 0..6]
@@ -422,7 +427,7 @@ function Chart3Heatmap({ habits }: { habits: Habit[] }) {
     Array.from({ length: 7 }, (_, row) => {
       const d = new Date(gridStartDate + "T00:00:00")
       d.setDate(d.getDate() + col * 7 + row)
-      const ds = d.toISOString().slice(0, 10)
+      const ds = localIso(d)
       const isFuture = ds > today
       const isToday = ds === today
       const count = habits.filter(h => h.logs.some(l => l.date === ds)).length

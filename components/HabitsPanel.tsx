@@ -11,6 +11,12 @@ interface Habit    { id: string; name: string; color: string; logs: HabitLog[] }
 const DOW = ["S", "M", "T", "W", "T", "F", "S"]
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+// Use local date (not UTC) so habits reset at local midnight, not UTC midnight
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 function isoForDay(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
 }
@@ -18,7 +24,7 @@ function isoForDay(year: number, month: number, day: number): string {
 // ── Component ─────────────────────────────────────────────────────────────
 export default function HabitsPanel() {
   const now      = new Date()
-  const todayIso = now.toISOString().slice(0, 10)
+  const todayIso = localIso(now)
 
   const [habits,   setHabits]   = useState<Habit[]>([])
   const [loaded,   setLoaded]   = useState(false)
@@ -249,9 +255,9 @@ export default function HabitsPanel() {
                 {/* Streak badge */}
                 {(() => {
                   let streak = 0
-                  const d = new Date(todayIso)
+                  const d = new Date()
                   while (true) {
-                    const iso = d.toISOString().slice(0, 10)
+                    const iso = localIso(d)
                     if (!habit.logs.some((l) => l.date === iso)) break
                     streak++
                     d.setDate(d.getDate() - 1)
