@@ -89,7 +89,8 @@ function localIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
 }
 
-const today = localIso(new Date())
+// NOTE: today is computed inside the component (not at module level)
+// so it stays accurate if the user keeps the tab open past midnight.
 
 function getStreak(logs: HabitLog[]): number {
   const logSet = new Set(logs.map(l => l.date))
@@ -437,6 +438,9 @@ function AddModal({ onClose, onCreated, onUpdated, existingCount }: AddModalProp
 export default function HabitsPage() {
   const { status } = useSession()
   const router = useRouter()
+
+  // Computed fresh on every render — stays accurate if tab is open past midnight
+  const today = localIso(new Date())
 
   const [habits, setHabits] = useState<Habit[]>([])
   const [loading, setLoading] = useState(true)
