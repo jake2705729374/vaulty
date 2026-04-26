@@ -25,15 +25,20 @@ export async function GET() {
 
   // Build a compact text summary for Claude
   const moodSummary = moodLogs
-    .map((l) => `${new Date(l.loggedAt).toLocaleDateString()} — ${l.mood}`)
+    .map((l: (typeof moodLogs)[number]) => `${new Date(l.loggedAt).toLocaleDateString()} — ${l.mood}`)
     .join("\n")
 
-  const moodCounts = moodLogs.reduce<Record<string, number>>((acc, l) => {
-    acc[l.mood] = (acc[l.mood] ?? 0) + 1
-    return acc
-  }, {})
+  const moodCounts: Record<string, number> = moodLogs.reduce(
+    (acc: Record<string, number>, l: (typeof moodLogs)[number]) => {
+      acc[l.mood] = (acc[l.mood] ?? 0) + 1
+      return acc
+    },
+    {} as Record<string, number>,
+  )
 
-  const dominantMood = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
+  const dominantMood =
+    (Object.entries(moodCounts) as [string, number][])
+      .sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
 
   const response = await anthropic.messages.create({
     model: "claude-opus-4-6",
@@ -61,9 +66,9 @@ export async function GET() {
   const third = Math.floor(moodLogs.length / 3)
   const MOOD_SCORE: Record<string, number> = { GREAT: 5, GOOD: 4, OKAY: 3, LOW: 2, AWFUL: 1 }
   const recentAvg =
-    moodLogs.slice(0, third).reduce((s, l) => s + (MOOD_SCORE[l.mood] ?? 3), 0) / third
+    moodLogs.slice(0, third).reduce((s: number, l: (typeof moodLogs)[number]) => s + (MOOD_SCORE[l.mood] ?? 3), 0) / third
   const olderAvg =
-    moodLogs.slice(-third).reduce((s, l) => s + (MOOD_SCORE[l.mood] ?? 3), 0) / third
+    moodLogs.slice(-third).reduce((s: number, l: (typeof moodLogs)[number]) => s + (MOOD_SCORE[l.mood] ?? 3), 0) / third
   const trend = recentAvg > olderAvg + 0.5 ? "improving" : recentAvg < olderAvg - 0.5 ? "declining" : "stable"
 
   return NextResponse.json({ summary, dominantMood, trend })

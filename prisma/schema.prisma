@@ -13,13 +13,35 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   passwordHash  String    // bcrypt hash of master password
+
+  // ── Envelope encryption key bundle ───────────────────────────────────────
+  // The Master Encryption Key (MEK) is a random AES-256 key that encrypts
+  // all journal entries. The MEK itself is wrapped (encrypted) with a Key
+  // Encryption Key (KEK) derived from the user's password via PBKDF2.
+  // Changing the password only requires re-wrapping the MEK — entries stay.
+  encryptedMek  String?   // AES-GCM ciphertext of the 256-bit MEK (base64)
+  mekIv         String?   // AES-GCM IV used to encrypt the MEK (base64)
+  kekSalt       String?   // PBKDF2 salt for deriving the KEK from the password (base64)
+
+  // Email verification (set false on registration, true after code confirmed)
+  emailVerified    Boolean   @default(true)   // true for pre-existing accounts
+  verifyToken      String?
+  verifyTokenExp   DateTime?
+
+  // Password-reset OTP (6-digit code, stored as SHA-256 hex, expires in 15 min)
+  resetToken    String?
+  resetTokenExp DateTime?
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  entries       Entry[]
-  moodLogs      MoodLog[]
-  sessions      Session[]
-  preferences   UserPreferences?
+  entries          Entry[]
+  moodLogs         MoodLog[]
+  sessions         Session[]
+  preferences      UserPreferences?
+  memories         Memory[]
+  sessionSummaries SessionSummary[]
+  habits           Habit[]
 }
 
 // Journal entries — ciphertext only, never plaintext
@@ -29,14 +51,35 @@ model Entry {
   title      String   // stored as plaintext (non-sensitive)
   ciphertext String   // AES-256 encrypted entry body
   iv         String   // initialisation vector (base64)
-  salt       String   // PBKDF2 salt (base64)
+  salt       String?  // PBKDF2 salt (base64) — NULL for MEK-encrypted entries
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  moodLog    MoodLog?
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  moodLog      MoodLog?
+  media        EntryMedia[]
+  chatMessages ChatMessage[]
 
   @@index([userId, createdAt])
+}
+
+// Photos and videos attached to an entry — stored as raw bytes in Postgres
+// so they are included in pg_dump backups automatically.
+model EntryMedia {
+  id        String   @id @default(cuid())
+  entryId   String
+  userId    String
+  data      Bytes    // raw binary (image / video)
+  mimeType  String
+  fileName  String
+  fileSize  Int      // bytes
+  caption   String?  // optional user-written caption / comment
+  createdAt DateTime @default(now())
+
+  entry     Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@index([userId])
 }
 
 // Mood logged per entry (1:1)
@@ -60,6 +103,8 @@ enum ColorTheme {
   ROSE
   FOREST
   MIDNIGHT
+  VAULT
+  CUSTOM
 }
 
 enum DarkMode {
@@ -69,14 +114,30 @@ enum DarkMode {
 }
 
 model UserPreferences {
-  id          String     @id @default(cuid())
-  userId      String     @unique
-  displayName String?
-  colorTheme  ColorTheme @default(PARCHMENT)
-  darkMode    DarkMode   @default(SYSTEM)
-  updatedAt   DateTime   @updatedAt
+  id                  String     @id @default(cuid())
+  userId              String     @unique
+  displayName         String?
+  colorTheme          ColorTheme @default(VAULT)
+  darkMode            DarkMode   @default(SYSTEM)
+  journalingGoals     String?    // JSON array: ["mental_clarity","gratitude", ...]
+  journalingFrequency String?    // "daily" | "few_times_week" | "weekly" | "whenever"
+  onboardingDone      Boolean    @default(false)
+  customTheme         String?    // JSON: {"accent":"#hex","page":"#hex"}
+  quoteCategories     String?    // JSON array: ["stoic","success", ...]
+  // ── AI Coach profile ─────────────────────────────────────────────────────
+  coachContextEnabled Boolean    @default(false)
+  coachPeople         String?    // JSON: [{name: string, relationship: string}]
+  coachLifeContext    String?    // JSON: {phase: string, situations: string[]}
+  // ── AI personalisation extras ─────────────────────────────────────────
+  userBio             String?    // short free-text bio the user writes about themselves
+  coachStyle          String?    // "gentle" | "direct" | "challenging" | "balanced"
+  // ── Weekly digest ─────────────────────────────────────────────────────
+  digestEnabled       Boolean    @default(false)
+  digestDay           String     @default("sunday")
+  lastDigestAt        DateTime?
+  updatedAt           DateTime   @updatedAt
 
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 enum Mood {
@@ -85,6 +146,77 @@ enum Mood {
   OKAY
   LOW
   AWFUL
+}
+
+// ── Per-entry coach conversation history ─────────────────────────────────────
+model ChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  entryId   String
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now())
+
+  entry     Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId, createdAt])
+  @@index([userId])
+}
+
+// ── Saved insights / memories bookmarked from coach ──────────────────────────
+model Memory {
+  id        String   @id @default(cuid())
+  userId    String
+  content   String
+  source    String?  // "coach" | "manual"
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ── Auto-generated summaries of coach sessions ───────────────────────────────
+model SessionSummary {
+  id        String   @id @default(cuid())
+  userId    String
+  entryId   String?  // optional link to the entry the session was in
+  summary   String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ── Habit tracker ─────────────────────────────────────────────────────────
+model Habit {
+  id          String     @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  color       String     @default("#6366f1")
+  order       Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs        HabitLog[]
+
+  @@index([userId, order])
+}
+
+model HabitLog {
+  id        String   @id @default(cuid())
+  habitId   String
+  userId    String
+  date      String   // ISO date string "YYYY-MM-DD" — no time component
+  createdAt DateTime @default(now())
+
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@unique([habitId, date])
+  @@index([userId, date])
 }
 
 // NextAuth sessions

@@ -18,7 +18,7 @@ export async function GET() {
   })
 
   return NextResponse.json({
-    entries: entries.map((e) => ({
+    entries: entries.map((e: (typeof entries)[number]) => ({
       id: e.id,
       title: e.title,
       createdAt: e.createdAt.toISOString(),
@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { title, ciphertext, iv, salt, mood } = await req.json()
-  if (!ciphertext || !iv || !salt) {
+  const { title, ciphertext, iv, salt = null, mood } = await req.json()
+  if (!ciphertext || !iv) {
     return NextResponse.json({ error: "Missing encrypted content" }, { status: 400 })
   }
 
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       title: title ?? "Untitled",
       ciphertext,
       iv,
-      salt,
+      salt,   // null for MEK-encrypted entries, base64 string for legacy
       ...(mood && {
         moodLog: {
           create: { userId: session.user.id, mood },

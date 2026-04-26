@@ -115,3 +115,23 @@ Sub-agents live in `.claude/agents/` and have strictly scoped file domains:
 - Always run `npm run build` after backend changes
 - Pi backup scripts are shell-only — no Node.js on the Pi side
 - Mobile-first — optimised for iPhone browser
+
+---
+
+## Knowledge Wiki
+
+A persistent LLM-maintained wiki lives in `Journal App/` (the Obsidian vault at the repo root).
+
+**Read before working on:**
+- Encryption changes → `Journal App/wiki/concepts/encryption-architecture.md`
+- AI/therapist changes → `Journal App/wiki/concepts/ai-therapist-design.md`
+- Any architectural question → `Journal App/wiki/overview.md`
+- Decision rationale → `Journal App/wiki/decisions/`
+
+**Update after working:**
+After making any significant architectural change or decision, before closing the task:
+1. Update or create the relevant page in `Journal App/wiki/concepts/` or `Journal App/wiki/decisions/`
+2. Update `Journal App/index.md` if a new page was created
+3. Append an entry to `Journal App/log.md` with format `## [YYYY-MM-DD] update | description`
+
+See `Journal App/CLAUDE.md` for the full wiki schema and workflows.

@@ -12,19 +12,34 @@ export async function GET(
   const { id } = await params
   const entry = await prisma.entry.findFirst({
     where: { id, userId: session.user.id },
-    include: { moodLog: { select: { mood: true } } },
+    include: {
+      moodLog: { select: { mood: true } },
+      // Metadata only — raw bytes are served via GET /media/[mediaId]
+      media: {
+        select: { id: true, fileName: true, mimeType: true, fileSize: true, caption: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
   })
 
   if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   return NextResponse.json({
-    id: entry.id,
-    title: entry.title,
+    id:         entry.id,
+    title:      entry.title,
     ciphertext: entry.ciphertext,
-    iv: entry.iv,
-    salt: entry.salt,
-    createdAt: entry.createdAt.toISOString(),
-    mood: entry.moodLog?.mood ?? null,
+    iv:         entry.iv,
+    salt:       entry.salt,
+    createdAt:  entry.createdAt.toISOString(),
+    mood:       entry.moodLog?.mood ?? null,
+    media:      entry.media.map((m: { id: string; fileName: string; mimeType: string; fileSize: number; caption: string | null; createdAt: Date }) => ({
+      id:        m.id,
+      fileName:  m.fileName,
+      mimeType:  m.mimeType,
+      fileSize:  m.fileSize,
+      caption:   m.caption,
+      createdAt: m.createdAt.toISOString(),
+    })),
   })
 }
 
@@ -39,8 +54,8 @@ export async function PUT(
   const existing = await prisma.entry.findFirst({ where: { id, userId: session.user.id } })
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  const { title, ciphertext, iv, salt, mood } = await req.json()
-  if (!ciphertext || !iv || !salt) {
+  const { title, ciphertext, iv, salt = null, mood } = await req.json()
+  if (!ciphertext || !iv) {
     return NextResponse.json({ error: "Missing encrypted content" }, { status: 400 })
   }
 
@@ -50,7 +65,7 @@ export async function PUT(
       title: title ?? "Untitled",
       ciphertext,
       iv,
-      salt,
+      salt,   // null for MEK-encrypted entries, base64 string for legacy
     },
   })
 

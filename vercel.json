@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/api/entries/[id]/media/route.ts": {
+      "maxDuration": 60
+    }
+  }
+}
