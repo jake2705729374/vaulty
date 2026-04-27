@@ -353,6 +353,9 @@ export default function JournalEditor({
   // Mobile tab state ("write" | "habits" | "coach")
   const [mobileTab, setMobileTab] = useState<"write" | "habits" | "coach">("write")
 
+  // Desktop right panel — habits panel is hidden until explicitly opened
+  const [showHabits, setShowHabits] = useState(false)
+
   // Stable refs for use inside onUpdate closure
   const titleRef      = useRef(initialTitle)
   const moodRef       = useRef<string | null>(initialMood)
@@ -528,6 +531,11 @@ export default function JournalEditor({
 
   // Keep editorRef current (must live after useEditor declaration)
   useEffect(() => { editorRef.current = editor }, [editor])
+
+  // ── When Coach opens, close the habits panel so they don't fight ─────
+  useEffect(() => {
+    if (showCoach) setShowHabits(false)
+  }, [showCoach])
 
   // ── Auto-save on title change (2 s debounce) ─────────────────────────
   // onUpdate only fires on editor content changes, so title-only edits
@@ -1438,20 +1446,22 @@ export default function JournalEditor({
         {/* Habits shortcut */}
         <button
           onClick={() => {
-            // On desktop: if coach is open, close it to reveal habits panel
-            if (showCoach && onToggleCoach) onToggleCoach()
-            // On mobile: switch to habits tab
-            setMobileTab("habits")
+            const next = !showHabits
+            setShowHabits(next)
+            // If opening habits, close coach so they don't compete for the right panel
+            if (next && showCoach && onToggleCoach) onToggleCoach()
+            // Mirror to mobile tab
+            setMobileTab(next ? "habits" : "write")
           }}
-          title="View habits"
+          title={showHabits ? "Close habits" : "View habits"}
           className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors flex-shrink-0 ml-1"
           style={{
-            backgroundColor: mobileTab === "habits" ? "var(--color-accent)" : "var(--color-surface-2)",
-            color:           mobileTab === "habits" ? "#ffffff"              : "var(--color-ink-muted)",
-            border:          `1px solid ${mobileTab === "habits" ? "var(--color-accent)" : "var(--color-border)"}`,
+            backgroundColor: (showHabits || mobileTab === "habits") ? "var(--color-accent)" : "var(--color-surface-2)",
+            color:           (showHabits || mobileTab === "habits") ? "#ffffff"              : "var(--color-ink-muted)",
+            border:          `1px solid ${(showHabits || mobileTab === "habits") ? "var(--color-accent)" : "var(--color-border)"}`,
           }}
-          onMouseEnter={(e) => { if (mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-ink)" } }}
-          onMouseLeave={(e) => { if (mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-surface-2)"; e.currentTarget.style.color = "var(--color-ink-muted)" } }}
+          onMouseEnter={(e) => { if (!showHabits && mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-ink)" } }}
+          onMouseLeave={(e) => { if (!showHabits && mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-surface-2)"; e.currentTarget.style.color = "var(--color-ink-muted)" } }}
         >
           <IconCheckCircle />
           <span>Habits</span>
@@ -2197,7 +2207,8 @@ export default function JournalEditor({
       </div>
     </div>{/* end editor column */}
 
-      {/* ── Desktop right panel — always visible on md+ ──────────────────── */}
+      {/* ── Desktop right panel — only mounts when something is active ─── */}
+      {(isListening || dictationError || grammarResult || (showCoach && onToggleCoach) || showHabits) && (
       <div
         className="hidden md:flex flex-col border-l flex-shrink-0 sticky top-0"
         style={{ width: 360, height: "100vh", borderColor: "var(--color-border)", backgroundColor: "var(--color-surface)" }}
@@ -2386,10 +2397,11 @@ export default function JournalEditor({
             onClose={onToggleCoach}
             onInsertToEntry={handleInsertToEntry}
           />
-        ) : (
+        ) : showHabits ? (
           <HabitsPanel />
-        )}
+        ) : null}
       </div>
+      )}
     </div>
   )
 }

@@ -43,6 +43,11 @@ function daysUntilBirthday(birthday: string): number | null {
  * Builds the dynamic user-context block.
  * This is NOT cached (changes per user) — the stable base rules are cached separately.
  */
+interface HabitForContext {
+  name: string
+  logs: { date: string }[]
+}
+
 function buildContextBlock(
   coachContext:    CoachContext | null,
   entryContent:    string,
@@ -52,6 +57,7 @@ function buildContextBlock(
   userBio:         string | null,
   coachStyle:      string | null,
   elevated:        boolean = false,
+  habits:          HabitForContext[] = [],
 ): string {
   const parts: string[] = []
 
@@ -154,6 +160,20 @@ function buildContextBlock(
     )
   }
 
+  // Habits — today's completion status so the coach can celebrate wins or encourage
+  if (habits.length > 0) {
+    // Use server UTC date — close enough for context purposes (within 1 day for any timezone)
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const habitLines = habits.map((h) => {
+      const doneToday = h.logs.some((l) => l.date === todayIso)
+      return `  • ${h.name}: ${doneToday ? "✓ done today" : "○ not yet done today"}`
+    })
+    parts.push(
+      `\nUser's tracked habits (today's status):\n${habitLines.join("\n")}\n` +
+      `Reference these naturally — celebrate completions, gently encourage what's pending, but don't make every message about habits.`,
+    )
+  }
+
   return parts.join("\n")
 }
 
@@ -183,8 +203,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing message" }, { status: 400 })
   }
 
-  // Load server-side context: memories + session summaries + prefs (bio, style)
-  const [memoriesRaw, summariesRaw, prefs] = await Promise.all([
+  // Load server-side context: memories + session summaries + prefs (bio, style) + habits
+  const todayIso = new Date().toISOString().slice(0, 10)
+
+  const [memoriesRaw, summariesRaw, prefs, habitsRaw] = await Promise.all([
     prisma.memory.findMany({
       where:   { userId: session.user.id },
       orderBy: { createdAt: "desc" },
@@ -201,16 +223,29 @@ export async function POST(req: NextRequest) {
       where:  { userId: session.user.id },
       select: { userBio: true, coachStyle: true },
     }),
+    // Fetch habits with ONLY today's log so the coach knows completion status
+    prisma.habit.findMany({
+      where:   { userId: session.user.id },
+      orderBy: { order: "asc" },
+      select:  {
+        name: true,
+        logs: {
+          where:  { date: todayIso },
+          select: { date: true },
+        },
+      },
+    }),
   ])
 
   const memories         = memoriesRaw.map((m: { content: string }) => m.content)
   const sessionSummaries = summariesRaw.map((s: { summary: string }) => s.summary)
   const userBio          = prefs?.userBio    ?? null
   const coachStyle       = prefs?.coachStyle ?? "balanced"
+  const habits           = habitsRaw as HabitForContext[]
 
   const contextBlock = buildContextBlock(
     coachContext, entryContent, recentEntries,
-    memories, sessionSummaries, userBio, coachStyle, elevated,
+    memories, sessionSummaries, userBio, coachStyle, elevated, habits,
   )
 
   const systemBlocks: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] = [
