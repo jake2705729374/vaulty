@@ -1,25 +1,21 @@
 /**
  * Edge-compatible auth config — no Prisma or Node-only imports.
- * Used by middleware (Edge Runtime) and re-used by lib/auth.ts (Node Runtime).
+ * Used by proxy.ts (Edge Runtime) and re-used by lib/auth.ts (Node Runtime).
+ *
+ * IMPORTANT: Do NOT import any providers here. Even a no-op Credentials
+ * provider can pull in modules that aren't Edge-safe, causing
+ * MIDDLEWARE_INVOCATION_FAILED on Vercel. The Credentials provider lives
+ * exclusively in lib/auth.ts which runs in Node Runtime.
  */
 import type { NextAuthConfig } from "next-auth"
-import Credentials from "next-auth/providers/credentials"
 
 export const authConfig: NextAuthConfig = {
-  // Required on Vercel: the request host differs from NEXTAUTH_URL due to proxy headers.
-  // Without this, JWT decoding fails → MIDDLEWARE_INVOCATION_FAILED on sign-out.
+  // Required on Vercel: proxy headers mean the request Host differs from
+  // NEXTAUTH_URL. Without trustHost the JWT decode fails mid-request.
   trustHost: true,
-  providers: [
-    // authorize() is intentionally empty here — full logic lives in lib/auth.ts
-    // which runs in Node Runtime and can access Prisma.
-    Credentials({
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      authorize: () => null,
-    }),
-  ],
+  // No providers — the Edge middleware only needs to validate JWTs,
+  // not authenticate credentials. Full Credentials logic is in lib/auth.ts.
+  providers: [],
   pages: {
     signIn: "/login",
   },

@@ -1421,18 +1421,40 @@ export default function JournalEditor({
           title="Grammar & spelling check"
           className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors disabled:opacity-40 flex-shrink-0 ml-1"
           style={{
-            backgroundColor: "var(--color-surface-2)",
-            color: "var(--color-ink-muted)",
-            border: "1px solid var(--color-border)",
+            backgroundColor: grammarResult ? "var(--color-accent)" : "var(--color-surface-2)",
+            color: grammarResult ? "#ffffff" : "var(--color-ink-muted)",
+            border: `1px solid ${grammarResult ? "var(--color-accent)" : "var(--color-border)"}`,
           }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-border)"}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-surface-2)"}
+          onMouseEnter={(e) => { if (!grammarResult) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
+          onMouseLeave={(e) => { if (!grammarResult) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
         >
           {grammarLoading
             ? <span className="inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
             : <IconSparkles />
           }
           <span>Grammar</span>
+        </button>
+
+        {/* Habits shortcut */}
+        <button
+          onClick={() => {
+            // On desktop: if coach is open, close it to reveal habits panel
+            if (showCoach && onToggleCoach) onToggleCoach()
+            // On mobile: switch to habits tab
+            setMobileTab("habits")
+          }}
+          title="View habits"
+          className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors flex-shrink-0 ml-1"
+          style={{
+            backgroundColor: mobileTab === "habits" ? "var(--color-accent)" : "var(--color-surface-2)",
+            color:           mobileTab === "habits" ? "#ffffff"              : "var(--color-ink-muted)",
+            border:          `1px solid ${mobileTab === "habits" ? "var(--color-accent)" : "var(--color-border)"}`,
+          }}
+          onMouseEnter={(e) => { if (mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-border)"; e.currentTarget.style.color = "var(--color-ink)" } }}
+          onMouseLeave={(e) => { if (mobileTab !== "habits") { e.currentTarget.style.backgroundColor = "var(--color-surface-2)"; e.currentTarget.style.color = "var(--color-ink-muted)" } }}
+        >
+          <IconCheckCircle />
+          <span>Habits</span>
         </button>
 
         {/* ── Media attach ── */}
