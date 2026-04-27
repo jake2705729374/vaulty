@@ -181,9 +181,8 @@
   --color-ink-faint: #4338ca;
 }
 
-/* ── VAULT (always dark — blue accent, near-black bg) ── */
+/* ── VAULT dark (default) ── */
 [data-theme="vault"],
-[data-theme="vault"][data-dark="light"],
 [data-theme="vault"][data-dark="dark"] {
   --color-page:         #0A0A0F;
   --color-surface:      #111118;
@@ -194,6 +193,19 @@
   --color-ink:          #f0f0f0;
   --color-ink-muted:    #8b8ba7;
   --color-ink-faint:    #555570;
+}
+
+/* ── VAULT light ── */
+[data-theme="vault"][data-dark="light"] {
+  --color-page:         #f4f7ff;
+  --color-surface:      #ffffff;
+  --color-surface-2:    #eef2ff;
+  --color-border:       #d1dff7;
+  --color-accent:       #2563EB;
+  --color-accent-hover: #1d4ed8;
+  --color-ink:          #0f172a;
+  --color-ink-muted:    #4b607f;
+  --color-ink-faint:    #94a7c5;
 }
 
 /* ── Semantic utilities ── */

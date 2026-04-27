@@ -64,8 +64,11 @@ const CUSTOM_PROPS = [
   "--color-ink", "--color-ink-muted", "--color-ink-faint",
 ]
 
-// VAULT: hardcoded exact values — injected as inline styles to beat CSS cascade
-const VAULT_COLORS = {
+// ── VAULT colour palettes ────────────────────────────────────────────────
+// Inline styles beat the CSS cascade, so we inject them directly.
+// Two palettes so VAULT honours the Appearance (Light / Dark / System) toggle.
+
+const VAULT_DARK = {
   page:        "#0A0A0F",
   surface:     "#111118",
   surface2:    "#1a1a26",
@@ -77,18 +80,40 @@ const VAULT_COLORS = {
   inkFaint:    "#555570",
 }
 
-function applyVaultTheme() {
+const VAULT_LIGHT = {
+  page:        "#f4f7ff",
+  surface:     "#ffffff",
+  surface2:    "#eef2ff",
+  border:      "#d1dff7",
+  accent:      "#2563EB",
+  accentHover: "#1d4ed8",
+  ink:         "#0f172a",
+  inkMuted:    "#4b607f",
+  inkFaint:    "#94a7c5",
+}
+
+/** Resolve "SYSTEM" to the actual OS preference at call time. */
+function resolveMode(darkMode: DarkMode): "dark" | "light" {
+  if (darkMode === "SYSTEM") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+  }
+  return darkMode.toLowerCase() as "dark" | "light"
+}
+
+function applyVaultTheme(resolvedMode: "dark" | "light" = "dark") {
+  const c    = resolvedMode === "light" ? VAULT_LIGHT : VAULT_DARK
   const root = document.documentElement
   root.setAttribute("data-theme", "vault")
-  root.style.setProperty("--color-page",         VAULT_COLORS.page)
-  root.style.setProperty("--color-surface",       VAULT_COLORS.surface)
-  root.style.setProperty("--color-surface-2",     VAULT_COLORS.surface2)
-  root.style.setProperty("--color-border",        VAULT_COLORS.border)
-  root.style.setProperty("--color-accent",        VAULT_COLORS.accent)
-  root.style.setProperty("--color-accent-hover",  VAULT_COLORS.accentHover)
-  root.style.setProperty("--color-ink",           VAULT_COLORS.ink)
-  root.style.setProperty("--color-ink-muted",     VAULT_COLORS.inkMuted)
-  root.style.setProperty("--color-ink-faint",     VAULT_COLORS.inkFaint)
+  root.setAttribute("data-dark",  resolvedMode)
+  root.style.setProperty("--color-page",         c.page)
+  root.style.setProperty("--color-surface",       c.surface)
+  root.style.setProperty("--color-surface-2",     c.surface2)
+  root.style.setProperty("--color-border",        c.border)
+  root.style.setProperty("--color-accent",        c.accent)
+  root.style.setProperty("--color-accent-hover",  c.accentHover)
+  root.style.setProperty("--color-ink",           c.ink)
+  root.style.setProperty("--color-ink-muted",     c.inkMuted)
+  root.style.setProperty("--color-ink-faint",     c.inkFaint)
 }
 
 function applyCustomTheme(accent: string, page: string) {
@@ -116,7 +141,8 @@ function syncCustomToStorage(accent: string, page: string) {
 }
 
 function applyThemeAttributes(colorTheme: ColorTheme, darkMode: DarkMode) {
-  if (colorTheme === "CUSTOM" || colorTheme === "VAULT") return // handled via inline styles
+  // VAULT and CUSTOM are handled via inline styles — skip them here.
+  if (colorTheme === "CUSTOM" || colorTheme === "VAULT") return
   const root = document.documentElement
   root.setAttribute("data-theme", colorTheme.toLowerCase())
   let resolved: "dark" | "light"
@@ -163,7 +189,7 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
           } catch { /* */ }
         } else if (theme === "VAULT") {
           clearCustomTheme()
-          applyVaultTheme()
+          applyVaultTheme(resolveMode(mode))
           syncToLocalStorage(theme, mode)
         } else {
           clearCustomTheme()
@@ -174,28 +200,36 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
       .catch(() => { /* keep defaults */ })
   }, [session?.user?.id])
 
-  // Sync on change (non-custom, non-vault)
+  // Re-apply whenever theme or mode changes (non-custom, non-vault handled here too)
   useEffect(() => {
-    if (colorTheme !== "CUSTOM" && colorTheme !== "VAULT") {
+    if (colorTheme === "VAULT") {
+      applyVaultTheme(resolveMode(darkMode))
+    } else if (colorTheme !== "CUSTOM") {
       applyThemeAttributes(colorTheme, darkMode)
     }
   }, [colorTheme, darkMode])
 
-  // System dark mode listener
+  // System dark-mode OS listener — keep in sync for both VAULT and CSS-driven themes
   useEffect(() => {
     if (darkMode !== "SYSTEM") return
-    const mq      = window.matchMedia("(prefers-color-scheme: dark)")
-    const handler = (e: MediaQueryListEvent) =>
-      document.documentElement.setAttribute("data-dark", e.matches ? "dark" : "light")
+    const mq = window.matchMedia("(prefers-color-scheme: dark)")
+    const handler = (e: MediaQueryListEvent) => {
+      const resolved = e.matches ? "dark" : "light"
+      if (colorTheme === "VAULT") {
+        applyVaultTheme(resolved)
+      } else {
+        document.documentElement.setAttribute("data-dark", resolved)
+      }
+    }
     mq.addEventListener("change", handler)
     return () => mq.removeEventListener("change", handler)
-  }, [darkMode])
+  }, [darkMode, colorTheme])
 
   const setColorTheme = useCallback(async (theme: ColorTheme) => {
     clearCustomTheme()
     setColorThemeState(theme)
     if (theme === "VAULT") {
-      applyVaultTheme()
+      applyVaultTheme(resolveMode(darkMode))
       syncToLocalStorage(theme, darkMode)
     } else if (theme !== "CUSTOM") {
       document.documentElement.setAttribute("data-theme", theme.toLowerCase())
@@ -210,13 +244,17 @@ export function ThemeProvider({ children }: { children?: React.ReactNode }) {
 
   const setDarkMode = useCallback(async (mode: DarkMode) => {
     setDarkModeState(mode)
-    let resolved: "dark" | "light"
-    if (mode === "SYSTEM") {
-      resolved = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    const resolved: "dark" | "light" =
+      mode === "SYSTEM"
+        ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : (mode.toLowerCase() as "dark" | "light")
+
+    if (colorTheme === "VAULT") {
+      applyVaultTheme(resolved)
     } else {
-      resolved = mode.toLowerCase() as "dark" | "light"
+      document.documentElement.setAttribute("data-dark", resolved)
     }
-    document.documentElement.setAttribute("data-dark", resolved)
+
     syncToLocalStorage(colorTheme, mode)
     await fetch("/api/user/preferences", {
       method: "PATCH",
