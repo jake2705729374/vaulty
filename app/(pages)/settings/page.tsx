@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { useSession, signOut } from "next-auth/react"
+import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useTheme } from "@/components/ThemeProvider"
@@ -1389,7 +1389,10 @@ export default function SettingsPage() {
                 <button
                   onClick={() => {
                     sessionStorage.removeItem("masterPassword")
-                    signOut({ callbackUrl: "/" })
+                    // Use the server-side logout route instead of next-auth/react's
+                    // signOut() — the client signOut was consistently triggering
+                    // MIDDLEWARE_INVOCATION_FAILED on Vercel regardless of middleware impl.
+                    window.location.href = "/api/auth/logout"
                   }}
                   className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-inter font-medium transition-colors"
                   style={{

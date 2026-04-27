@@ -1,23 +1,19 @@
 /**
- * Edge-compatible middleware — NO NextAuth imports.
+ * Edge middleware — zero external dependencies.
  *
- * NextAuth v5's internal `jwtDecrypt` throws `AggregateError` when the token
- * is missing or malformed (e.g., during sign-out while cookies are being
- * cleared). That uncaught exception propagates out of the Edge Runtime and
- * produces Vercel's MIDDLEWARE_INVOCATION_FAILED / 500 error.
+ * Previous attempts used NextAuth and @panva/hkdf + jose.  Both crashed the
+ * Vercel Edge Runtime silently at module-init time (MIDDLEWARE_INVOCATION_FAILED
+ * with no log output).  This version uses ONLY next/server — no imports that
+ * could touch Node.js internals or Web Crypto at init time.
  *
- * Fix: bypass NextAuth entirely. Decode the session token ourselves using the
- * same algorithm NextAuth v5 uses internally:
- *   HKDF-SHA256(secret, salt=cookieName) → 64-byte key → jwtDecrypt (JWE)
- *
- * All JWT errors are caught and treated as "unauthenticated", so the
- * middleware NEVER throws — it always returns a valid Response.
+ * Security note: this middleware is a UX gate only (redirect to /login).
+ * Real authentication is enforced in every API route handler via `auth()` from
+ * lib/auth.ts (Node runtime), so a forged presence-only cookie still gets 401s
+ * from all data endpoints.
  */
-import { NextRequest, NextResponse } from "next/server"
-import { hkdf } from "@panva/hkdf"
-import { jwtDecrypt } from "jose"
+import type { NextRequest } from "next/server"
+import { NextResponse } from "next/server"
 
-// ── Protected-path list (same as the old authConfig.authorized callback) ────
 const PROTECTED = [
   "/dashboard",
   "/journal",
@@ -28,79 +24,32 @@ const PROTECTED = [
   "/onboarding",
 ]
 
-// ── Possible NextAuth v5 session-cookie names (HTTPS first) ─────────────────
-const SESSION_COOKIE_NAMES = [
-  "__Secure-authjs.session-token",   // NextAuth v5 production (HTTPS)
-  "authjs.session-token",            // NextAuth v5 development (HTTP)
-  "__Secure-next-auth.session-token",// NextAuth v4 production
-  "next-auth.session-token",         // NextAuth v4 development
+// All possible NextAuth v5 / v4 session-cookie names (production + dev + chunked)
+const SESSION_COOKIES = [
+  "__Secure-authjs.session-token",
+  "__Secure-authjs.session-token.0",
+  "authjs.session-token",
+  "authjs.session-token.0",
+  "__Secure-next-auth.session-token",
+  "next-auth.session-token",
 ]
 
-/** Derive the 64-byte JWE encryption key the same way NextAuth v5 does. */
-async function deriveKey(secret: string, salt: string): Promise<Uint8Array> {
-  return hkdf(
-    "sha256",
-    secret,
-    salt,
-    `Auth.js Generated Encryption Key (${salt})`,
-    64
-  )
-}
-
-/** Return true if `token` is a valid, non-expired NextAuth session JWT. */
-async function isValidToken(token: string, secret: string): Promise<boolean> {
-  for (const cookieName of SESSION_COOKIE_NAMES) {
-    try {
-      const key = await deriveKey(secret, cookieName)
-      await jwtDecrypt(token, key, { clockTolerance: 15 })
-      return true
-    } catch {
-      // Try next cookie name / wrong key — not a crash, just a miss
-    }
-  }
-  return false
-}
-
-export async function proxy(request: NextRequest): Promise<NextResponse> {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Only gate the routes that need protection
-  const isProtected = PROTECTED.some((p) => pathname.startsWith(p))
-  if (!isProtected) return NextResponse.next()
-
-  const secret =
-    process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? ""
-
-  // Try each possible cookie name in priority order
-  for (const cookieName of SESSION_COOKIE_NAMES) {
-    const rawToken = request.cookies.get(cookieName)?.value
-    if (!rawToken) continue
-
-    // Some browsers / next-auth chunk large tokens: cookieName.0, cookieName.1 …
-    // Collect all chunks and reassemble if needed.
-    let token = rawToken
-    const chunk1 = request.cookies.get(`${cookieName}.0`)?.value
-    if (chunk1) {
-      // Chunked token — reassemble
-      let chunks = chunk1
-      let i = 1
-      while (true) {
-        const next = request.cookies.get(`${cookieName}.${i}`)?.value
-        if (!next) break
-        chunks += next
-        i++
-      }
-      token = chunks
-    }
-
-    if (await isValidToken(token, secret)) {
-      return NextResponse.next()
-    }
+  if (!PROTECTED.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next()
   }
 
-  // No valid session found — redirect to login
-  const loginUrl = new URL("/login", request.url)
-  loginUrl.searchParams.set("callbackUrl", pathname)
+  const hasSession = SESSION_COOKIES.some(
+    (name) => !!request.cookies.get(name)?.value,
+  )
+
+  if (hasSession) return NextResponse.next()
+
+  const loginUrl = request.nextUrl.clone()
+  loginUrl.pathname = "/login"
+  loginUrl.search = `?callbackUrl=${encodeURIComponent(pathname)}`
   return NextResponse.redirect(loginUrl)
 }
 
