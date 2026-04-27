@@ -8,6 +8,7 @@ import { useTheme } from "@/components/ThemeProvider"
 import PageTransition from "@/components/PageTransition"
 import { QUOTE_CATEGORIES } from "@/lib/quotes"
 import { unlockMek, rewrapMek, type KeyBundle } from "@/lib/crypto"
+import { signOutAction } from "@/app/actions/auth"
 
 type ColorTheme = "PARCHMENT" | "SLATE" | "ROSE" | "FOREST" | "MIDNIGHT" | "VAULT" | "CUSTOM"
 type DarkMode = "SYSTEM" | "LIGHT" | "DARK"
@@ -1386,34 +1387,42 @@ export default function SettingsPage() {
                 <p className="text-xs text-ink-faint mb-3 font-inter">
                   Signing out clears your master password from this device.
                 </p>
-                <button
-                  onClick={() => {
-                    sessionStorage.removeItem("masterPassword")
-                    // Use the server-side logout route instead of next-auth/react's
-                    // signOut() — the client signOut was consistently triggering
-                    // MIDDLEWARE_INVOCATION_FAILED on Vercel regardless of middleware impl.
-                    window.location.href = "/api/auth/logout"
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-inter font-medium transition-colors"
-                  style={{
-                    color: "#dc2626",
-                    border: "1px solid rgba(220,38,38,0.25)",
-                    backgroundColor: "rgba(220,38,38,0.06)",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.12)"
-                    e.currentTarget.style.borderColor     = "rgba(220,38,38,0.4)"
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.06)"
-                    e.currentTarget.style.borderColor     = "rgba(220,38,38,0.25)"
-                  }}
+                {/*
+                  Sign-out uses a Server Action (signOutAction) so NextAuth's own
+                  signOut() clears the session cookie with the correct attributes.
+                  Our previous approach used response.cookies.delete() which omits
+                  Secure:true — browsers silently ignore deletion of __Secure-
+                  prefixed cookies that lack the Secure flag, leaving the user
+                  signed in.  onSubmit clears the in-memory master password before
+                  the action fires.
+                */}
+                <form
+                  action={signOutAction}
+                  onSubmit={() => sessionStorage.removeItem("masterPassword")}
                 >
-                  <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="1.8">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l3 3m0 0l-3 3m3-3H8m5-7H5a2 2 0 00-2 2v10a2 2 0 002 2h8" />
-                  </svg>
-                  Sign out
-                </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-inter font-medium transition-colors"
+                    style={{
+                      color: "#dc2626",
+                      border: "1px solid rgba(220,38,38,0.25)",
+                      backgroundColor: "rgba(220,38,38,0.06)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.12)"
+                      e.currentTarget.style.borderColor     = "rgba(220,38,38,0.4)"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.06)"
+                      e.currentTarget.style.borderColor     = "rgba(220,38,38,0.25)"
+                    }}
+                  >
+                    <svg viewBox="0 0 20 20" fill="none" className="w-4 h-4" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l3 3m0 0l-3 3m3-3H8m5-7H5a2 2 0 00-2 2v10a2 2 0 002 2h8" />
+                    </svg>
+                    Sign out
+                  </button>
+                </form>
               </SectionCard>
 
             </div>
