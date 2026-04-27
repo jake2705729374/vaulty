@@ -1119,8 +1119,8 @@ export default function SettingsPage() {
                 </div>
               </SectionCard>
 
-              {/* Appearance */}
-              <SectionCard title="Appearance" open={!collapsed.has("appearance")} onToggle={() => toggleSection("appearance")}>
+              {/* Appearance — hidden when custom theme is active (user controls colours directly) */}
+              {!isCustom && <SectionCard title="Appearance" open={!collapsed.has("appearance")} onToggle={() => toggleSection("appearance")}>
                 <div
                   className="inline-flex rounded-lg border overflow-hidden"
                   style={{ borderColor: "var(--color-border)" }}
@@ -1154,7 +1154,7 @@ export default function SettingsPage() {
                     )
                   })}
                 </div>
-              </SectionCard>
+              </SectionCard>}
 
               {/* ── Weekly Digest ─────────────────────────────────── */}
               <SectionCard
