@@ -87,6 +87,51 @@ const GOALS_LIST = [
   { id: "habit_tracking",      label: "Habit tracking",      sub: "Stay consistent with your goals" },
 ]
 
+// ── SectionCard must live OUTSIDE SettingsPage.
+// If defined inside, React treats it as a brand-new component type on every
+// parent render → full unmount/remount of every card → page scrolls to top.
+function SectionCard({
+  title, icon, children, id, open, onToggle,
+}: {
+  title:    string
+  icon?:    React.ReactNode
+  children: React.ReactNode
+  id?:      string
+  open:     boolean
+  onToggle: () => void
+}) {
+  return (
+    <div id={id} className="rounded-2xl bg-surface" style={{ border: "1px solid var(--color-border)" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-6 py-4 text-left focus:outline-none"
+      >
+        <div className="flex items-center gap-2">
+          {icon}
+          <span className="text-xs font-inter font-semibold text-ink-faint uppercase tracking-widest">{title}</span>
+        </div>
+        <svg
+          viewBox="0 0 20 20" fill="currentColor" width="14" height="14"
+          style={{
+            color: "var(--color-ink-faint)",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
+            flexShrink: 0,
+          }}
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
+        </svg>
+      </button>
+      <div style={{ display: open ? "block" : "none" }}>
+        <div className="px-6 pb-6">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { status } = useSession()
   const router = useRouter()
@@ -400,51 +445,6 @@ export default function SettingsPage() {
 
   const isCustom = colorTheme === "CUSTOM"
 
-  // ── Collapsible section card wrapper ─────────────────────────────────────
-  function SectionCard({
-    sectionKey, title, icon, children, id,
-  }: {
-    sectionKey: string
-    title: string
-    icon?: React.ReactNode
-    children: React.ReactNode
-    id?: string
-  }) {
-    const open = !isCollapsed(sectionKey)
-    return (
-      <div id={id} className="rounded-2xl bg-surface" style={{ border: "1px solid var(--color-border)" }}>
-        {/* Clickable header */}
-        <button
-          type="button"
-          onClick={() => toggleSection(sectionKey)}
-          className="w-full flex items-center justify-between px-6 py-4 text-left focus:outline-none"
-        >
-          <div className="flex items-center gap-2">
-            {icon}
-            <span className="text-xs font-inter font-semibold text-ink-faint uppercase tracking-widest">{title}</span>
-          </div>
-          <svg
-            viewBox="0 0 20 20" fill="currentColor" width="14" height="14"
-            style={{
-              color: "var(--color-ink-faint)",
-              transform: open ? "rotate(180deg)" : "rotate(0deg)",
-              transition: "transform 0.2s",
-              flexShrink: 0,
-            }}
-          >
-            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.168l3.71-3.938a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clipRule="evenodd" />
-          </svg>
-        </button>
-        {/* Collapsible body */}
-        <div style={{ display: open ? "block" : "none" }}>
-          <div className="px-6 pb-6">
-            {children}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (status === "loading") return null
 
   return (
@@ -484,7 +484,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
 
               {/* Display name */}
-              <SectionCard sectionKey="displayName" title="Display name">
+              <SectionCard title="Display name" open={!collapsed.has("displayName")} onToggle={() => toggleSection("displayName")}>
                 <input
                   type="text"
                   value={displayName}
@@ -499,7 +499,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Focus areas */}
-              <SectionCard sectionKey="focusAreas" title="Focus areas">
+              <SectionCard title="Focus areas" open={!collapsed.has("focusAreas")} onToggle={() => toggleSection("focusAreas")}>
                 <div className="grid grid-cols-2 gap-2">
                   {GOALS_LIST.map(({ id, label, sub }) => {
                     const selected = goals.includes(id)
@@ -534,7 +534,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Quote preferences */}
-              <SectionCard sectionKey="quotePrefs" title="Quote preferences">
+              <SectionCard title="Quote preferences" open={!collapsed.has("quotePrefs")} onToggle={() => toggleSection("quotePrefs")}>
                 <p className="text-xs font-inter text-ink-faint mb-3">
                   Select categories to personalise your daily quote.
                 </p>
@@ -562,9 +562,10 @@ export default function SettingsPage() {
 
               {/* Coach Profile */}
               <SectionCard
-                sectionKey="coachProfile"
                 id="coach-profile"
                 title="Coach profile"
+                open={!collapsed.has("coachProfile")}
+                onToggle={() => toggleSection("coachProfile")}
                 icon={
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{ color: "var(--color-accent)" }}>
                     <path d="M15.98 1.804a1 1 0 0 0-1.96 0l-.24 1.192a1 1 0 0 1-.784.785l-1.192.239a1 1 0 0 0 0 1.962l1.192.24a1 1 0 0 1 .785.783l.239 1.192a1 1 0 0 0 1.962 0l.24-1.192a1 1 0 0 1 .783-.784l1.192-.24a1 1 0 0 0 0-1.962l-1.192-.239a1 1 0 0 1-.784-.785l-.24-1.192ZM6.949 5.684a1 1 0 0 0-1.898 0l-.683 2.051a1 1 0 0 1-.633.633l-2.051.683a1 1 0 0 0 0 1.898l2.051.684a1 1 0 0 1 .633.632l.683 2.051a1 1 0 0 0 1.898 0l.683-2.051a1 1 0 0 1 .633-.633l2.051-.683a1 1 0 0 0 0-1.898l-2.051-.683a1 1 0 0 1-.633-.633L6.95 5.684ZM13.949 13.684a1 1 0 0 0-1.898 0l-.184.551a1 1 0 0 1-.632.633l-.551.183a1 1 0 0 0 0 1.898l.551.183a1 1 0 0 1 .633.633l.183.551a1 1 0 0 0 1.898 0l.184-.551a1 1 0 0 1 .632-.633l.551-.183a1 1 0 0 0 0-1.898l-.551-.184a1 1 0 0 1-.633-.632l-.183-.551Z" />
@@ -951,7 +952,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
 
               {/* Color scheme */}
-              <SectionCard sectionKey="colorScheme" title="Color scheme">
+              <SectionCard title="Color scheme" open={!collapsed.has("colorScheme")} onToggle={() => toggleSection("colorScheme")}>
 
                 {/* Swatches row */}
                 <div className="flex gap-3 flex-wrap items-end">
@@ -1122,7 +1123,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Appearance */}
-              <SectionCard sectionKey="appearance" title="Appearance">
+              <SectionCard title="Appearance" open={!collapsed.has("appearance")} onToggle={() => toggleSection("appearance")}>
                 <div
                   className="inline-flex rounded-lg border overflow-hidden"
                   style={{ borderColor: "var(--color-border)" }}
@@ -1160,8 +1161,9 @@ export default function SettingsPage() {
 
               {/* ── Weekly Digest ─────────────────────────────────── */}
               <SectionCard
-                sectionKey="weeklyDigest"
                 title="Weekly digest"
+                open={!collapsed.has("weeklyDigest")}
+                onToggle={() => toggleSection("weeklyDigest")}
                 icon={
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{ color: "var(--color-accent)" }}>
                     <path fillRule="evenodd" d="M5.404 14.596A6.5 6.5 0 1 1 16.5 10a1.25 1.25 0 0 1-2.5 0 4 4 0 1 0-1.174 2.826.75.75 0 0 1 1.06 1.06 5.5 5.5 0 1 1 .496-7.955 6.5 6.5 0 0 1-8.978 8.665ZM10 8.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" clipRule="evenodd" />
@@ -1225,8 +1227,9 @@ export default function SettingsPage() {
 
               {/* ── Saved Memories ────────────────────────────────── */}
               <SectionCard
-                sectionKey="savedMemories"
                 title={`Saved memories${memories.length > 0 ? ` (${memories.length})` : ""}`}
+                open={!collapsed.has("savedMemories")}
+                onToggle={() => toggleSection("savedMemories")}
                 icon={
                   <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style={{ color: "var(--color-accent)" }}>
                     <path d="M9.653 16.915l-.005-.003-.019-.01a20.759 20.759 0 0 1-1.162-.682 22.045 22.045 0 0 1-2.582-2.09c-1.99-2.02-3.63-4.865-3.63-8.13a5.254 5.254 0 0 1 10.508 0c0 3.265-1.64 6.11-3.63 8.13a22.042 22.042 0 0 1-2.582 2.09 20.759 20.759 0 0 1-1.162.682l-.019.01-.005.003h-.002a.5.5 0 0 1-.468 0h-.002Z" />
@@ -1282,7 +1285,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Change password */}
-              <SectionCard sectionKey="changePassword" title="Change password">
+              <SectionCard title="Change password" open={!collapsed.has("changePassword")} onToggle={() => toggleSection("changePassword")}>
                 <p className="text-xs font-inter text-ink-faint mb-5">
                   Your entries are re-encrypted automatically — changing the password only takes a second.
                 </p>
@@ -1382,7 +1385,7 @@ export default function SettingsPage() {
               </SectionCard>
 
               {/* Account */}
-              <SectionCard sectionKey="account" title="Account">
+              <SectionCard title="Account" open={!collapsed.has("account")} onToggle={() => toggleSection("account")}>
                 <p className="text-xs text-ink-faint mb-3 font-inter">
                   Signing out clears your master password from this device.
                 </p>
