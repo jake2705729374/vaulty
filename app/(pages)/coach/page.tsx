@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { useSession } from "next-auth/react"
-import { useRouter, usePathname } from "next/navigation"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import PageTransition from "@/components/PageTransition"
 import { type CoachContext } from "@/components/CoachPanel"
@@ -30,16 +30,17 @@ function IconPaperPlane() {
   )
 }
 
-const NAV_LINKS = [
-  { href: "/journal",   label: "Journal"  },
-  { href: "/coach",     label: "Coach"    },
-  { href: "/settings",  label: "Settings" },
-]
+function IconChevronLeft() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  )
+}
 
 export default function CoachPage() {
   const { status } = useSession()
   const router     = useRouter()
-  const pathname   = usePathname()
 
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "Hey — I'm your coach. What's on your mind today?" },
@@ -155,94 +156,44 @@ export default function CoachPage() {
         {/* ── Sticky nav header ─────────────────────────────────────────── */}
         <header
           className="sticky top-0 z-40 border-b flex-shrink-0"
-          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)", backdropFilter: "blur(12px)" }}
         >
-          <div className="flex items-center justify-between px-4 md:px-6 h-14 max-w-screen-xl mx-auto">
+          <div className="flex items-center justify-between px-4 md:px-8 h-14 max-w-screen-xl mx-auto gap-4">
 
-            {/* Logo */}
-            <Link href="/dashboard" className="flex items-center gap-2 shrink-0">
-              <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold font-sora"
-                style={{ background: "linear-gradient(135deg, var(--color-accent), var(--color-accent-hover, var(--color-accent)))" }}
+            {/* Left: back link + journal name */}
+            <div className="flex items-center gap-3 min-w-0">
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-1 text-sm font-inter transition-colors h-9 px-2 rounded-lg shrink-0"
+                style={{ color: "var(--color-ink-muted)" }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "var(--color-ink)"
+                  e.currentTarget.style.backgroundColor = "var(--color-surface-2)"
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--color-ink-muted)"
+                  e.currentTarget.style.backgroundColor = "transparent"
+                }}
               >
-                V
-              </div>
-              <span className="hidden sm:block text-sm font-sora font-semibold text-ink">Vaultly</span>
-            </Link>
-
-            {/* Page title (mobile) */}
-            <div className="flex items-center gap-1.5 sm:hidden">
-              <span style={{ color: "var(--color-accent)" }}><IconSparkles /></span>
-              <span className="text-sm font-sora font-semibold text-ink">Coach</span>
+                <IconChevronLeft />
+                Dashboard
+              </Link>
+              <div className="w-px h-5 shrink-0" style={{ backgroundColor: "var(--color-border)" }} />
+              <h1 className="text-base font-sora font-semibold text-ink truncate">
+                {coachContext?.displayName ? `${coachContext.displayName}'s Journal` : "My Journal"}
+              </h1>
             </div>
 
-            {/* Desktop nav */}
-            <nav className="hidden sm:flex items-center gap-1" aria-label="Primary">
-              {NAV_LINKS.map(({ href, label }) => {
-                const isActive = pathname === href
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-inter font-medium transition-colors"
-                    style={{
-                      backgroundColor: isActive ? "var(--color-surface-2)" : "transparent",
-                      color: isActive ? "var(--color-ink)" : "var(--color-ink-muted)",
-                    }}
-                  >
-                    {label === "Coach" && <IconSparkles size={13} />}
-                    {label}
-                  </Link>
-                )
-              })}
-            </nav>
-
-            {/* Right spacer (desktop) / Dashboard link (mobile) */}
-            <Link
-              href="/dashboard"
-              className="text-xs font-inter hidden sm:block transition-colors"
-              style={{ color: "var(--color-ink-faint)" }}
-              onMouseEnter={(e) => e.currentTarget.style.color = "var(--color-ink-muted)"}
-              onMouseLeave={(e) => e.currentTarget.style.color = "var(--color-ink-faint)"}
-            >
-              ← Home
-            </Link>
-            <Link
-              href="/dashboard"
-              className="text-xs font-inter sm:hidden transition-colors"
-              style={{ color: "var(--color-ink-faint)" }}
-            >
-              Home
-            </Link>
-          </div>
-
-          {/* Mobile nav row */}
-          <div
-            className="sm:hidden flex border-t px-4"
-            style={{ borderColor: "var(--color-border)" }}
-          >
-            {NAV_LINKS.map(({ href, label }) => {
-              const isActive = pathname === href
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-inter font-medium transition-colors"
-                  style={{
-                    color: isActive ? "var(--color-accent)" : "var(--color-ink-muted)",
-                    borderBottom: isActive ? "2px solid var(--color-accent)" : "2px solid transparent",
-                  }}
-                >
-                  {label === "Coach" && <IconSparkles size={11} />}
-                  {label}
-                </Link>
-              )
-            })}
+            {/* Right: Coach label */}
+            <div className="flex items-center gap-1.5 shrink-0" style={{ color: "var(--color-ink-muted)" }}>
+              <IconSparkles size={14} />
+              <span className="text-sm font-inter font-medium">Coach</span>
+            </div>
           </div>
         </header>
 
         {/* ── Chat area ──────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-h-0 w-full max-w-2xl mx-auto">
+        <div className="flex-1 flex flex-col min-h-0 w-full">
 
           {/* Messages — scrollable */}
           <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
