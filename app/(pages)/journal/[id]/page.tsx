@@ -48,7 +48,10 @@ export default function EntryPage({ params }: { params: Promise<{ id: string }> 
   const [coachContextEnabled, setCoachContextEnabled] = useState(false)
   const [recentEntries,       setRecentEntries]       = useState<string[]>([])
 
-  const autoSavingRef = useRef(false)
+  const autoSavingRef       = useRef(false)
+  // Track last saved state for auto-delete on cancel if entry is empty
+  const lastSavedTitleRef   = useRef("")
+  const lastSavedContentRef = useRef("")
 
   // Delete confirmation
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -168,6 +171,8 @@ export default function EntryPage({ params }: { params: Promise<{ id: string }> 
   }: { title: string; content: string; mood: string | null }) {
     if (!masterPassword || autoSavingRef.current) return
     autoSavingRef.current = true
+    lastSavedTitleRef.current   = title
+    lastSavedContentRef.current = content
     try {
       const { ciphertext, iv, salt } = await encryptContent(content)
       await fetch(`/api/entries/${id}`, {
@@ -185,6 +190,8 @@ export default function EntryPage({ params }: { params: Promise<{ id: string }> 
     title, content, mood,
   }: { title: string; content: string; mood: string | null }) {
     if (!masterPassword) return
+    lastSavedTitleRef.current   = title
+    lastSavedContentRef.current = content
     const { ciphertext, iv, salt } = await encryptContent(content)
     await fetch(`/api/entries/${id}`, {
       method:  "PUT",
@@ -192,6 +199,25 @@ export default function EntryPage({ params }: { params: Promise<{ id: string }> 
       body:    JSON.stringify({ title: title || "Untitled", ciphertext, iv, salt, mood }),
     })
     // Stay in the editor — the header already shows "Auto-saved" status
+  }
+
+  // ── Auto-delete on cancel if entry is completely empty ────────────────────
+  function handleCancel() {
+    // Use last saved state if available, otherwise fall back to initial loaded state
+    const effectiveTitle   = lastSavedTitleRef.current || entry?.title   || ""
+    const effectiveContent = lastSavedContentRef.current || decryptedContent || ""
+    const titleEmpty   = !effectiveTitle.trim() ||
+      effectiveTitle.trim().toLowerCase() === "untitled"
+    const contentEmpty = !effectiveContent.trim() ||
+      effectiveContent.replace(/<[^>]*>/g, "").trim() === ""
+    const mediaEmpty   = !entry?.media?.length
+
+    if (titleEmpty && contentEmpty && mediaEmpty) {
+      // Silent auto-delete — no confirmation needed
+      fetch(`/api/entries/${id}`, { method: "DELETE" }).catch(() => {})
+    }
+
+    router.push("/journal")
   }
 
   function handleDelete() {
@@ -258,7 +284,7 @@ export default function EntryPage({ params }: { params: Promise<{ id: string }> 
           mek={mek}
           onSave={handleSave}
           onAutoSave={handleAutoSave}
-          onCancel={() => router.push("/journal")}
+          onCancel={handleCancel}
           onDelete={handleDelete}
           draftKey={`journal-draft-${id}`}
           coachContext={coachContext}

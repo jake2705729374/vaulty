@@ -43,8 +43,11 @@ export default function JournalPage() {
   // ── Prompt carried in from dashboard ───────────────────────────────────
   const [activePrompt, setActivePrompt] = useState<string | null>(null)
 
-  const newEntryIdRef = useRef<string | null>(null)
-  const savingRef     = useRef(false)
+  const newEntryIdRef       = useRef<string | null>(null)
+  const savingRef           = useRef(false)
+  // Track last saved content so we can auto-delete empty entries on cancel
+  const lastSavedTitleRef   = useRef("")
+  const lastSavedContentRef = useRef("")
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login")
@@ -207,6 +210,9 @@ export default function JournalPage() {
   }: { title: string; content: string; mood: string | null }) {
     if (!masterPassword) return
 
+    lastSavedTitleRef.current   = title
+    lastSavedContentRef.current = content
+
     const encrypted = mek
       ? await encryptWithMek(content, mek)
       : await encryptEntry(content, masterPassword)
@@ -242,6 +248,10 @@ export default function JournalPage() {
   }: { title: string; content: string; mood: string | null }) {
     if (!masterPassword || savingRef.current) return
     savingRef.current = true
+
+    lastSavedTitleRef.current   = title
+    lastSavedContentRef.current = content
+
     try {
       const encrypted = mek
         ? await encryptWithMek(content, mek)
@@ -321,7 +331,23 @@ export default function JournalPage() {
   }
 
   function handleCancelNew() {
-    newEntryIdRef.current = null
+    const id = newEntryIdRef.current
+
+    // Auto-delete if the entry was saved but has no meaningful content
+    if (id) {
+      const titleEmpty   = !lastSavedTitleRef.current.trim()
+      const contentEmpty = !lastSavedContentRef.current.trim() ||
+        lastSavedContentRef.current.replace(/<[^>]*>/g, "").trim() === ""
+      if (titleEmpty && contentEmpty) {
+        // Optimistically remove from list, fire delete in background
+        setEntries((prev) => prev.filter((e) => e.id !== id))
+        fetch(`/api/entries/${id}`, { method: "DELETE" }).catch(() => {})
+      }
+    }
+
+    newEntryIdRef.current       = null
+    lastSavedTitleRef.current   = ""
+    lastSavedContentRef.current = ""
     setCurrentEntryId(null)
     setView("list")
   }

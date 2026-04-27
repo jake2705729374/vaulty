@@ -99,8 +99,8 @@ export default function SettingsPage() {
   const debounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Collapsible sections state — all open by default
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // Collapsible sections state — all open by default except Saved Memories
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(["savedMemories"]))
   function toggleSection(key: string) {
     setCollapsed(prev => {
       const next = new Set(prev)
