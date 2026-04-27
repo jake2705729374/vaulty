@@ -7,6 +7,7 @@ import { rateLimit } from "@/lib/rate-limit"
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {

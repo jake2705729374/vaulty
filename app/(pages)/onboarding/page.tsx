@@ -395,13 +395,16 @@ export default function OnboardingPage() {
             <span style={{ color: "#8B8BA7", fontSize: "11px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
               Step {step} of {TOTAL_STEPS}
             </span>
-            <button
-              onClick={() => router.push("/dashboard")}
-              style={{ color: "#8B8BA7", fontSize: "12px" }}
-              className="hover:text-white transition-colors duration-150"
-            >
-              Skip for now
-            </button>
+            {/* Only allow skipping after name is entered (step 1 is required) */}
+            {step > 1 && (
+              <button
+                onClick={() => router.push("/dashboard")}
+                style={{ color: "#8B8BA7", fontSize: "12px" }}
+                className="hover:text-white transition-colors duration-150"
+              >
+                Skip for now
+              </button>
+            )}
           </div>
 
           {/* Step content */}
@@ -1205,7 +1208,8 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={goNext}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:opacity-90"
+                disabled={step === 1 && !name.trim()}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: "linear-gradient(135deg, #2563EB, #1D4ED8)", boxShadow: "0 0 20px rgba(37,99,235,0.35)" }}
               >
                 Continue

@@ -6,6 +6,9 @@ import type { NextAuthConfig } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 
 export const authConfig: NextAuthConfig = {
+  // Required on Vercel: the request host differs from NEXTAUTH_URL due to proxy headers.
+  // Without this, JWT decoding fails → MIDDLEWARE_INVOCATION_FAILED on sign-out.
+  trustHost: true,
   providers: [
     // authorize() is intentionally empty here — full logic lives in lib/auth.ts
     // which runs in Node Runtime and can access Prisma.

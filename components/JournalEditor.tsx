@@ -1720,11 +1720,10 @@ export default function JournalEditor({
       </div>{/* end writing canvas */}
 
       {/* ── Right-side floating panel: dictation + grammar ───────────────── */}
-      {/* Fixed to the right of the viewport, below the sticky header+toolbar. */}
-      {/* On mobile it sits top-right; on desktop it naturally clears the coach panel. */}
+      {/* Mobile only (md:hidden) — on desktop this content moves into the right panel. */}
       {(isListening || dictationError || grammarResult) && (
         <div
-          className="fixed z-[90] right-3 flex flex-col gap-2"
+          className="md:hidden fixed z-[90] right-3 flex flex-col gap-2"
           style={{ top: "7rem", width: 300, maxHeight: "calc(100vh - 8rem)", overflowY: "auto" }}
         >
 
@@ -2181,7 +2180,182 @@ export default function JournalEditor({
         className="hidden md:flex flex-col border-l flex-shrink-0 sticky top-0"
         style={{ width: 360, height: "100vh", borderColor: "var(--color-border)", backgroundColor: "var(--color-surface)" }}
       >
-        {showCoach && onToggleCoach ? (
+        {/* Grammar / dictation takes over the right panel when active */}
+        {(isListening || dictationError || grammarResult) ? (
+          <div className="flex flex-col gap-2 p-3 overflow-y-auto h-full">
+            {/* Header label */}
+            <p className="text-[10px] font-inter font-semibold uppercase tracking-widest px-1 mb-1"
+              style={{ color: "var(--color-ink-faint)" }}>
+              {grammarResult ? "Grammar Check" : "Voice Dictation"}
+            </p>
+
+            {/* Error */}
+            {dictationError && (
+              <div className="rounded-xl px-4 py-3 flex items-start gap-3 text-sm font-inter"
+                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid rgba(239,68,68,0.35)" }}>
+                <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15" className="flex-shrink-0 mt-0.5" style={{ color: "#ef4444" }}>
+                  <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+                </svg>
+                <p className="flex-1 text-xs font-inter leading-snug" style={{ color: "#ef4444" }}>{dictationError}</p>
+                <button onClick={() => setDictationError(null)} className="flex-shrink-0 transition-colors" style={{ color: "rgba(239,68,68,0.5)" }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = "#ef4444"}
+                  onMouseLeave={(e) => e.currentTarget.style.color = "rgba(239,68,68,0.5)"}>
+                  <IconXMark />
+                </button>
+              </div>
+            )}
+
+            {/* Prompting */}
+            {isListening && dictationPhase === "prompting" && (
+              <div className="rounded-xl px-4 py-3"
+                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
+                  <span className="text-[10px] font-inter font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-faint)" }}>{dictationBrowser}</span>
+                </div>
+                <p className="text-xs font-inter font-medium leading-snug" style={{ color: "var(--color-ink)" }}>
+                  Look at <strong>{micPromptLocation(dictationBrowser)}</strong> and click <strong>Allow</strong>.
+                </p>
+                <p className="text-[10px] font-inter mt-1.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
+                  {dictationBrowser === "Opera GX"
+                    ? "Opera GX: click the lock icon → Site Settings → Microphone → Allow."
+                    : "This permission only needs to be granted once per site."}
+                </p>
+              </div>
+            )}
+
+            {/* Active listening */}
+            {isListening && dictationPhase === "active" && (
+              <div className="rounded-xl px-4 py-3 flex items-center gap-3"
+                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid rgba(239,68,68,0.35)" }}>
+                <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
+                  {[8, 14, 18, 12, 7].map((h, i) => (
+                    <span key={i} className="block rounded-full animate-pulse"
+                      style={{ width: 3, height: h, backgroundColor: "#ef4444", animationDuration: `${0.65 + i * 0.15}s`, animationDelay: `${i * 0.1}s` }} />
+                  ))}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>{dictationBrowser}</p>
+                  <p className="text-xs font-inter font-medium truncate" style={{ color: "#ef4444" }}>{interimText || dictationStatus}</p>
+                  <p className="text-[10px] font-inter mt-0.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
+                    Say &ldquo;period&rdquo;, &ldquo;comma&rdquo;, &ldquo;new paragraph&rdquo;
+                  </p>
+                </div>
+                <button onClick={stopDictation} title="Stop dictation"
+                  className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-colors"
+                  style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "#ef4444" }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.22)"}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.12)"}>
+                  <IconXMark />
+                </button>
+              </div>
+            )}
+
+            {/* Grammar results */}
+            {grammarResult && (
+              <div className="rounded-xl overflow-hidden"
+                style={{ border: "1px solid var(--color-border)", backgroundColor: "var(--color-surface-2)" }}>
+                <div className="flex items-center justify-between px-3 py-2.5 border-b" style={{ borderColor: "var(--color-border)" }}>
+                  <div className="flex items-center gap-1.5">
+                    {grammarResult.matches.length === 0
+                      ? <span style={{ color: "#22c55e" }}><IconCheckCircle /></span>
+                      : <span style={{ color: "var(--color-accent)" }}><IconSparkles /></span>}
+                    <span className="text-xs font-sora font-semibold text-ink">
+                      {grammarResult.matches.length === 0 ? "All clear!" : "Grammar Check"}
+                    </span>
+                    {grammarResult.matches.length > 0 && (
+                      <span className="text-[10px] font-inter px-1.5 py-0.5 rounded-full font-medium"
+                        style={{ backgroundColor: "var(--color-accent)", color: "#fff" }}>
+                        {grammarResult.matches.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {grammarResult.matches.some((m) => m.replacements.length > 0) && (
+                      <button onClick={applyGrammarFix}
+                        className="flex items-center gap-1 text-[10px] font-inter font-semibold px-2 py-1 rounded-md text-white transition-colors"
+                        style={{ backgroundColor: "var(--color-accent)" }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-accent-hover)"}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-accent)"}>
+                        <IconCheck />Apply all
+                      </button>
+                    )}
+                    <button onClick={() => setGrammarResult(null)} title="Dismiss"
+                      className="w-6 h-6 flex items-center justify-center rounded-md transition-colors"
+                      style={{ color: "var(--color-ink-faint)" }}
+                      onMouseEnter={(e) => e.currentTarget.style.color = "var(--color-ink)"}
+                      onMouseLeave={(e) => e.currentTarget.style.color = "var(--color-ink-faint)"}>
+                      <IconXMark />
+                    </button>
+                  </div>
+                </div>
+                <div className="p-2.5">
+                  {grammarResult.matches.length === 0 ? (
+                    <p className="text-xs font-inter" style={{ color: "#22c55e" }}>No issues — your writing looks great!</p>
+                  ) : (
+                    <ul className="space-y-1.5 max-h-[calc(100vh-16rem)] overflow-y-auto">
+                      {grammarResult.matches.map((m, i) => {
+                        const catStyle      = ltCategoryStyle(m.rule.category.id)
+                        const before        = m.context.text.slice(0, m.context.offset)
+                        const error         = m.context.text.slice(m.context.offset, m.context.offset + m.context.length)
+                        const after         = m.context.text.slice(m.context.offset + m.context.length)
+                        const topSuggestion = m.replacements[0]?.value
+                        return (
+                          <li key={i} className="rounded-lg p-2.5 space-y-1.5"
+                            style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 capitalize leading-tight"
+                                style={{ backgroundColor: catStyle.bg, color: catStyle.color }}>
+                                {catStyle.label}
+                              </span>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                {topSuggestion && (
+                                  <button onClick={() => applyOneFix(i)}
+                                    className="flex items-center gap-0.5 text-[10px] font-inter font-semibold px-1.5 py-0.5 rounded text-white transition-colors"
+                                    style={{ backgroundColor: "var(--color-accent)" }}
+                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-accent-hover)"}
+                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-accent)"}>
+                                    <IconCheck />Fix
+                                  </button>
+                                )}
+                                <button onClick={() => dismissOne(i)} title="Dismiss"
+                                  className="w-5 h-5 flex items-center justify-center rounded transition-colors"
+                                  style={{ color: "var(--color-ink-faint)" }}
+                                  onMouseEnter={(e) => e.currentTarget.style.color = "var(--color-ink)"}
+                                  onMouseLeave={(e) => e.currentTarget.style.color = "var(--color-ink-faint)"}>
+                                  <IconXMark />
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-[11px] font-inter leading-snug" style={{ color: "var(--color-ink-muted)" }}>
+                              <span>{before}</span>
+                              <span className="rounded px-0.5 font-semibold"
+                                style={{ backgroundColor: `${catStyle.color}25`, color: catStyle.color, textDecoration: "underline wavy" }}>
+                                {error}
+                              </span>
+                              <span>{after}</span>
+                            </p>
+                            {topSuggestion && (
+                              <p className="text-[11px] font-inter" style={{ color: "var(--color-ink-faint)" }}>
+                                → <span className="font-semibold" style={{ color: "#22c55e" }}>{topSuggestion}</span>
+                                {m.replacements.length > 1 && (
+                                  <span> or {m.replacements.slice(1, 3).map((r) => r.value).join(", ")}</span>
+                                )}
+                              </p>
+                            )}
+                            <p className="text-[10px] font-inter leading-snug" style={{ color: "var(--color-ink-faint)" }}>
+                              {m.shortMessage || m.message}
+                            </p>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : showCoach && onToggleCoach ? (
           <CoachPanel
             entryContent={liveEditorText}
             recentEntries={recentEntries}
