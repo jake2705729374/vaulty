@@ -1,21 +1,15 @@
 /**
  * GET /api/auth/logout
  *
- * Server-side logout — bypasses next-auth/react's client signOut() entirely.
+ * Server-side logout that bypasses next-auth/react's signOut() entirely.
+ * Deletes every possible NextAuth session cookie via the Response API
+ * (no async cookies() needed), then redirects to the landing page.
  *
- * Why a custom route instead of signOut() from next-auth/react?
- * The client-side signOut() triggers a CSRF prefetch + POST to /api/auth/signout,
- * and the subsequent redirect was consistently causing MIDDLEWARE_INVOCATION_FAILED
- * on Vercel regardless of the middleware implementation.
- *
- * This route runs in Node Runtime (not Edge), so it can use the cookies() API to
- * explicitly delete every possible NextAuth session cookie, then redirect to "/".
- * No middleware runs on /api/auth/logout (not in the middleware matcher).
+ * Using request.url as the redirect base so it always resolves to the
+ * correct origin regardless of NEXTAUTH_URL config.
  */
-import { NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { NextRequest, NextResponse } from "next/server"
 
-// Every possible NextAuth v4/v5 cookie name (production __Secure- prefix + dev)
 const AUTH_COOKIES = [
   "__Secure-authjs.session-token",
   "__Secure-authjs.session-token.0",
@@ -26,7 +20,6 @@ const AUTH_COOKIES = [
   "authjs.session-token.1",
   "__Secure-next-auth.session-token",
   "next-auth.session-token",
-  // CSRF & callback cookies (clean up everything)
   "__Secure-authjs.csrf-token",
   "authjs.csrf-token",
   "__Host-authjs.csrf-token",
@@ -37,19 +30,15 @@ const AUTH_COOKIES = [
   "next-auth.callback-url",
 ]
 
-export async function GET() {
-  const jar = await cookies()
+export async function GET(request: NextRequest) {
+  // Redirect to the root of the same origin the request came from
+  const origin = new URL(request.url).origin
+  const response = NextResponse.redirect(`${origin}/`)
 
+  // Delete every possible auth cookie
   for (const name of AUTH_COOKIES) {
-    try {
-      jar.delete(name)
-    } catch {
-      // cookie may not exist — ignore
-    }
+    response.cookies.delete(name)
   }
 
-  // Redirect to landing page after clearing cookies
-  return NextResponse.redirect(
-    new URL("/", process.env.NEXTAUTH_URL ?? "https://vaultly-sepia.vercel.app"),
-  )
+  return response
 }
