@@ -100,12 +100,17 @@ export const proxy = auth((req) => {
  */
 export const config = {
   matcher: [
-    "/dashboard/:path*",
-    "/onboarding/:path*",
-    "/journal/:path*",
-    "/coach/:path*",
-    "/habits/:path*",
-    "/therapist/:path*",
-    "/settings/:path*",
+    /*
+     * Use (.*) instead of /:path* — the latter does not reliably match the
+     * bare path (e.g. /dashboard with no trailing segment) in Next.js 16.
+     * (.*) is a regex wildcard that matches the path itself AND any sub-paths.
+     */
+    "/dashboard(.*)",
+    "/onboarding(.*)",
+    "/journal(.*)",
+    "/coach(.*)",
+    "/habits(.*)",
+    "/therapist(.*)",
+    "/settings(.*)",
   ],
 }
