@@ -141,7 +141,23 @@ const CLOSENESS_LEVELS = [
   { value: "complicated", label: "Complicated" },
 ]
 
-const TOTAL_STEPS = 7
+const TOTAL_STEPS = 8
+
+const HABIT_COLORS = [
+  "#22C55E", "#3B82F6", "#A855F7", "#F97316",
+  "#EC4899", "#EF4444", "#06B6D4", "#EAB308",
+]
+
+const PRESET_HABITS = [
+  { name: "Morning pages",       emoji: "📝" },
+  { name: "Gratitude",           emoji: "🙏" },
+  { name: "Exercise",            emoji: "💪" },
+  { name: "Meditation",          emoji: "🧘" },
+  { name: "Read",                emoji: "📚" },
+  { name: "Drink water",         emoji: "💧" },
+  { name: "Sleep 8 hours",       emoji: "😴" },
+  { name: "No phone at night",   emoji: "📵" },
+]
 
 // ── Slide animation ───────────────────────────────────────────────────────
 const slide = {
@@ -166,6 +182,11 @@ export default function OnboardingPage() {
   const [frequency, setFrequency]           = useState<Frequency | null>(null)
   const [theme, setTheme]                   = useState<ColorTheme>("VAULT")
   const [quoteCategories, setQuoteCategories] = useState<QuoteCategory[]>([])
+
+  // Habits state (step 6)
+  const [onboardingHabits,    setOnboardingHabits]    = useState<{ name: string; color: string }[]>([])
+  const [newHabitName,        setNewHabitName]        = useState("")
+  const [newHabitColor,       setNewHabitColor]       = useState(HABIT_COLORS[0])
 
   // Coach profile state
   const [people,              setPeople]              = useState<CoachPerson[]>([])
@@ -263,6 +284,18 @@ export default function OnboardingPage() {
     )
   }
 
+  function addOnboardingHabit(name: string, color?: string) {
+    const trimmed = name.trim()
+    if (!trimmed || onboardingHabits.length >= 8) return
+    if (onboardingHabits.some((h) => h.name.toLowerCase() === trimmed.toLowerCase())) return
+    setOnboardingHabits((prev) => [...prev, { name: trimmed, color: color ?? newHabitColor }])
+    setNewHabitName("")
+  }
+
+  function removeOnboardingHabit(idx: number) {
+    setOnboardingHabits((prev) => prev.filter((_, i) => i !== idx))
+  }
+
   async function handleFinish() {
     setSaving(true)
     try {
@@ -283,6 +316,16 @@ export default function OnboardingPage() {
     } catch {
       // proceed anyway
     }
+
+    // Create any habits the user set up during onboarding
+    for (const habit of onboardingHabits) {
+      await fetch("/api/habits", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ name: habit.name, color: habit.color, description: "" }),
+      }).catch(() => {/* silently skip failures */})
+    }
+
     router.push("/dashboard")
   }
 
@@ -657,8 +700,133 @@ export default function OnboardingPage() {
                   </div>
                 )}
 
-                {/* ── Step 6: People ───────────────────────────── */}
+                {/* ── Step 6: Habits ──────────────────────────── */}
                 {step === 6 && (
+                  <div className="flex flex-col gap-5 flex-1">
+                    <div>
+                      <h1
+                        className="text-2xl font-bold leading-snug"
+                        style={{ fontFamily: "var(--font-sora)", color: "#F0F0F0" }}
+                      >
+                        Set up your first habits
+                      </h1>
+                      <p className="text-sm mt-1.5" style={{ color: "#8B8BA7" }}>
+                        Tap a suggestion or add your own. You can always edit these later.
+                      </p>
+                    </div>
+
+                    {/* Preset chips */}
+                    <div className="flex flex-wrap gap-2">
+                      {PRESET_HABITS.map((p) => {
+                        const added = onboardingHabits.some((h) => h.name === p.name)
+                        return (
+                          <button
+                            key={p.name}
+                            type="button"
+                            onClick={() => added ? removeOnboardingHabit(onboardingHabits.findIndex(h => h.name === p.name)) : addOnboardingHabit(p.name, newHabitColor)}
+                            disabled={!added && onboardingHabits.length >= 8}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-150 disabled:opacity-40"
+                            style={{
+                              background: added ? "rgba(37,99,235,0.2)" : "rgba(255,255,255,0.04)",
+                              border:     `1px solid ${added ? "rgba(37,99,235,0.6)" : "rgba(255,255,255,0.1)"}`,
+                              color:      added ? "#93B4FF" : "#8B8BA7",
+                            }}
+                          >
+                            <span>{p.emoji}</span>
+                            {p.name}
+                            {added && <span style={{ color: "#93B4FF" }}>✓</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Custom habit input */}
+                    <div className="flex flex-col gap-2.5">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={newHabitName}
+                          onChange={(e) => setNewHabitName(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && addOnboardingHabit(newHabitName)}
+                          placeholder="Custom habit name…"
+                          maxLength={40}
+                          className="flex-1 px-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
+                          style={{
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            color: "#F0F0F0",
+                            fontFamily: "var(--font-inter)",
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = "#2563EB")}
+                          onBlur={(e)  => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addOnboardingHabit(newHabitName)}
+                          disabled={!newHabitName.trim() || onboardingHabits.length >= 8}
+                          className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-150 disabled:opacity-40"
+                          style={{ background: "linear-gradient(135deg,#2563EB,#1D4ED8)", color: "#fff" }}
+                        >
+                          Add
+                        </button>
+                      </div>
+
+                      {/* Color picker */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs" style={{ color: "#555570" }}>Color:</span>
+                        {HABIT_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setNewHabitColor(c)}
+                            className="w-5 h-5 rounded-full transition-all duration-150 flex-shrink-0"
+                            style={{
+                              background: c,
+                              outline: newHabitColor === c ? `2px solid ${c}` : "none",
+                              outlineOffset: "2px",
+                              opacity: newHabitColor === c ? 1 : 0.5,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Added habits list */}
+                    {onboardingHabits.length > 0 && (
+                      <div className="flex flex-col gap-1.5">
+                        {onboardingHabits.map((h, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl"
+                            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: h.color }} />
+                              <span className="text-sm" style={{ color: "#F0F0F0" }}>{h.name}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removeOnboardingHabit(i)}
+                              className="text-xs transition-colors"
+                              style={{ color: "#555570" }}
+                              onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                              onMouseLeave={(e) => (e.currentTarget.style.color = "#555570")}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <p className="text-xs mt-auto" style={{ color: "#555570" }}>
+                      This step is optional — you can add habits anytime from the Habits page.
+                    </p>
+                  </div>
+                )}
+
+                {/* ── Step 7: People ───────────────────────────── */}
+                {step === 7 && (
                   <div className="flex flex-col gap-5 flex-1">
                     <div>
                       <h1
@@ -932,8 +1100,8 @@ export default function OnboardingPage() {
                   </div>
                 )}
 
-                {/* ── Step 7: Life context ─────────────────────── */}
-                {step === 7 && (
+                {/* ── Step 8: Life context ─────────────────────── */}
+                {step === 8 && (
                   <div className="flex flex-col gap-5 flex-1">
                     <div>
                       <h1

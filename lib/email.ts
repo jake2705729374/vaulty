@@ -57,9 +57,7 @@ export async function sendVerificationEmail(to: string, code: string): Promise<v
     ].join("\n"),
     html: emailShell(`
       <tr><td style="padding:32px 32px 0;text-align:center;">
-        <div style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:16px;">
-          <span style="color:#fff;font-size:22px;font-weight:800;font-family:Georgia,serif;">V</span>
-        </div>
+        <div style="display:inline-block;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:16px;line-height:48px;text-align:center;font-size:24px;font-weight:800;color:#fff;font-family:Georgia,serif;vertical-align:middle;">V</div>
         <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Confirm your email</h1>
         <p style="margin:0;font-size:14px;color:#6b7280;">Enter this code in the app to activate your vault.</p>
       </td></tr>
@@ -107,9 +105,7 @@ export async function sendWeeklyDigest({
     ].join("\n"),
     html: emailShell(`
       <tr><td style="padding:32px 32px 0;text-align:center;">
-        <div style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:16px;">
-          <span style="color:#fff;font-size:22px;font-weight:800;font-family:Georgia,serif;">V</span>
-        </div>
+        <div style="display:inline-block;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:16px;line-height:48px;text-align:center;font-size:24px;font-weight:800;color:#fff;font-family:Georgia,serif;vertical-align:middle;">V</div>
         <h1 style="margin:0 0 4px;font-size:20px;font-weight:700;color:#111827;">Your week in Vaultly</h1>
         <p style="margin:0;font-size:13px;color:#9ca3af;">${entryLabel} this week</p>
       </td></tr>

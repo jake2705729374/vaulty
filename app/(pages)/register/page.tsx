@@ -40,7 +40,9 @@ function RegisterForm() {
   const [verifyError, setVerifyError] = useState("")
   const [verifying,   setVerifying]   = useState(false)
   const [cooldown,    setCooldown]    = useState(0)
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const cooldownRef   = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Ref guard: prevents racing double-calls (auto-submit + button click)
+  const verifyingRef  = useRef(false)
 
   // ── Shared state ────────────────────────────────────────────────────────
   const [error,     setError]     = useState("")
@@ -147,9 +149,17 @@ function RegisterForm() {
   // ── Step 2: verify the code ──────────────────────────────────────────────
   async function handleVerify(e?: React.FormEvent) {
     e?.preventDefault()
+    // Guard against racing double-calls (auto-submit fires at same time as button click)
+    if (verifyingRef.current) return
+    verifyingRef.current = true
+
     setVerifyError("")
     const code = codeInputs.join("")
-    if (code.length < 6) { setVerifyError("Enter all 6 digits."); return }
+    if (code.length < 6) {
+      verifyingRef.current = false
+      setVerifyError("Enter all 6 digits.")
+      return
+    }
 
     setVerifying(true)
     const res = await fetch("/api/auth/verify-email", {
@@ -162,13 +172,14 @@ function RegisterForm() {
       const data = await res.json().catch(() => ({}))
       setVerifyError((data as { error?: string }).error ?? "Verification failed.")
       setVerifying(false)
+      verifyingRef.current = false
       // Clear inputs and refocus first box on wrong code
       setCodeInputs(["", "", "", "", "", ""])
       setTimeout(() => boxRefs.current[0]?.focus(), 50)
       return
     }
 
-    setVerifying(false)
+    // Note: verifyingRef stays true through redirect — no need to reset on success
 
     // When arriving from the login page, no password is stored here — just
     // redirect back to login so they can sign in normally.
