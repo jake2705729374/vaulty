@@ -47,37 +47,50 @@ const PROTECTED_PATHS = [
  *   2. Otherwise forward the request and attach production security headers.
  */
 export const proxy = auth((req) => {
-  const isLoggedIn  = !!req.auth?.user
-  const pathname    = req.nextUrl.pathname
-  const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p))
+  try {
+    const isLoggedIn  = !!req.auth?.user
+    const pathname    = req.nextUrl.pathname
+    const isProtected = PROTECTED_PATHS.some((p) => pathname.startsWith(p))
 
-  // ── Security gate ────────────────────────────────────────────────────────
-  // Unauthenticated request to a protected route → redirect to /login.
-  // This runs at the Edge before any page code or static asset is served.
-  if (isProtected && !isLoggedIn) {
-    const loginUrl = new URL("/login", req.url)
-    return NextResponse.redirect(loginUrl)
+    // ── Security gate ──────────────────────────────────────────────────────
+    // Unauthenticated request to a protected route → redirect to /login.
+    // This runs at the Edge before any page code or static asset is served.
+    if (isProtected && !isLoggedIn) {
+      return NextResponse.redirect(new URL("/login", req.url))
+    }
+
+    // ── Authenticated (or public route) ───────────────────────────────────
+    // Forward the request and add security headers to the response.
+    const res = NextResponse.next()
+
+    // Prevent the app from being embedded in iframes (clickjacking defence)
+    res.headers.set("X-Frame-Options", "DENY")
+    // Stop browsers guessing content types (MIME-sniffing defence)
+    res.headers.set("X-Content-Type-Options", "nosniff")
+    // Limit referrer information sent to third-party sites
+    res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
+    // Lock down browser features the app doesn't use
+    res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    // Force HTTPS for 2 years (Vercel already enforces this; belt-and-suspenders)
+    res.headers.set(
+      "Strict-Transport-Security",
+      "max-age=63072000; includeSubDomains; preload",
+    )
+
+    return res
+
+  } catch {
+    // ── Safety net ────────────────────────────────────────────────────────
+    // If anything throws unexpectedly inside the middleware (e.g. a JWT decode
+    // edge case), redirect to the branded error page instead of crashing the
+    // Edge Runtime and showing Vercel's raw error screen.
+    try {
+      return NextResponse.redirect(new URL("/oops", req.url))
+    } catch {
+      // Absolute last resort — req.url was somehow unparseable
+      return new NextResponse("An unexpected error occurred.", { status: 500 })
+    }
   }
-
-  // ── Authenticated (or public route) ─────────────────────────────────────
-  // Forward the request and add security headers to the response.
-  const res = NextResponse.next()
-
-  // Prevent the app from being embedded in iframes (clickjacking defence)
-  res.headers.set("X-Frame-Options", "DENY")
-  // Stop browsers guessing content types (MIME-sniffing defence)
-  res.headers.set("X-Content-Type-Options", "nosniff")
-  // Limit referrer information sent to third-party sites
-  res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin")
-  // Lock down browser features the app doesn't use
-  res.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-  // Force HTTPS for 2 years (Vercel already enforces this; belt-and-suspenders)
-  res.headers.set(
-    "Strict-Transport-Security",
-    "max-age=63072000; includeSubDomains; preload",
-  )
-
-  return res
 })
 
 /**
