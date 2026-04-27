@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes"
+import { BirthdayPicker } from "@/components/BirthdayPicker"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 type Goal = "mental_clarity" | "emotional_wellbeing" | "personal_growth" | "creativity" | "gratitude" | "habit_tracking"
@@ -991,20 +992,11 @@ export default function OnboardingPage() {
                                 >
                                   {/* Birthday */}
                                   <div className="pt-3">
-                                    <label className="block text-[11px] font-semibold uppercase tracking-widest mb-1.5" style={{ color: "#555570" }}>Birthday (MM/DD)</label>
-                                    <input
-                                      type="text"
-                                      value={p.birthday ?? ""}
-                                      onChange={(e) => updatePersonDetail(i, "birthday", e.target.value)}
-                                      placeholder="e.g. 03/15"
-                                      maxLength={5}
-                                      className="w-28 px-3 py-1.5 rounded-lg text-sm outline-none"
-                                      style={{
-                                        background: "rgba(255,255,255,0.05)",
-                                        border: "1px solid rgba(255,255,255,0.1)",
-                                        color: "#F0F0F0",
-                                        fontFamily: "var(--font-inter)",
-                                      }}
+                                    <label className="block text-[11px] font-semibold uppercase tracking-widest mb-1.5" style={{ color: "#555570" }}>Birthday</label>
+                                    <BirthdayPicker
+                                      value={p.birthday}
+                                      onChange={(val) => updatePersonDetail(i, "birthday", val)}
+                                      variant="dark"
                                     />
                                   </div>
 

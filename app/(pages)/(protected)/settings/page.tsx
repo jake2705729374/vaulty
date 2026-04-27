@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { useTheme } from "@/components/ThemeProvider"
+import { BirthdayPicker } from "@/components/BirthdayPicker"
 import PageTransition from "@/components/PageTransition"
 import { QUOTE_CATEGORIES } from "@/lib/quotes"
 import { unlockMek, rewrapMek, type KeyBundle } from "@/lib/crypto"
@@ -712,15 +713,11 @@ export default function SettingsPage() {
                               >
                                 {/* Birthday */}
                                 <div className="pt-3">
-                                  <label className="block text-xs font-inter font-semibold text-ink-muted mb-1.5">Birthday (MM/DD)</label>
-                                  <input
-                                    type="text"
-                                    value={p.birthday ?? ""}
-                                    onChange={(e) => updatePersonDetail(i, "birthday", e.target.value)}
-                                    placeholder="e.g. 03/15"
-                                    maxLength={5}
-                                    className="w-32 px-3 py-1.5 rounded-lg border bg-surface text-ink text-sm font-inter focus:outline-none focus:ring-2"
-                                    style={{ borderColor: "var(--color-border)", outlineColor: "var(--color-accent)" }}
+                                  <label className="block text-xs font-inter font-semibold text-ink-muted mb-1.5">Birthday</label>
+                                  <BirthdayPicker
+                                    value={p.birthday}
+                                    onChange={(val) => updatePersonDetail(i, "birthday", val)}
+                                    variant="themed"
                                   />
                                 </div>
 
