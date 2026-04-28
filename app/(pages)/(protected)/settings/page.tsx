@@ -1454,7 +1454,7 @@ export default function SettingsPage() {
                   style={{ borderTop: "1px solid var(--color-border)" }}
                 >
                   <p className="text-xs font-inter font-semibold uppercase tracking-widest mb-1" style={{ color: "#dc2626" }}>
-                    Danger zone
+                    Delete Account
                   </p>
                   <p className="text-xs text-ink-faint mb-3 font-inter">
                     Permanently deletes your account, all journal entries, habits, coach history, and every other piece of data. This cannot be undone.
