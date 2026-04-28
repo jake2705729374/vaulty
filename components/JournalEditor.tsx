@@ -16,6 +16,49 @@ function getDictationMimeType(): string {
   return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? ""
 }
 
+// ── Grammar-fix position mapper ───────────────────────────────────────────
+// Converts a plain-text offset produced by editor.getText({ blockSeparator: "\n\n" })
+// into the corresponding ProseMirror document position so fixes can be applied
+// directly in the document (preserving all paragraph / formatting structure).
+//
+// Algorithm: walk the ProseMirror node tree depth-first, mirroring exactly
+// what getText does — advance textOffset by character count for text nodes,
+// and by 2 (the length of "\n\n") when crossing into a non-first block sibling.
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildGrammarPosMap(doc: any): (offset: number) => number {
+  const map: number[] = []
+  let textOffset = 0
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function walk(node: any, docPos: number, isRoot: boolean) {
+    if (node.isText) {
+      const str: string = node.text
+      for (let i = 0; i < str.length; i++) map[textOffset++] = docPos + i
+      return
+    }
+    let firstBlock = true
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    node.forEach((child: any, childFragOffset: number) => {
+      // In ProseMirror, a child's absolute doc position = parent's docPos + 1 (open token) + fragOffset.
+      // For the doc root there is no open token, so childDocPos = fragOffset directly.
+      const childDocPos = isRoot ? childFragOffset : docPos + 1 + childFragOffset
+      if (child.isBlock && !firstBlock) {
+        // blockSeparator "\n\n" (2 chars) between adjacent block siblings
+        map[textOffset++] = childDocPos
+        map[textOffset++] = childDocPos
+      }
+      if (child.isBlock) firstBlock = false
+      walk(child, childDocPos, false)
+    })
+  }
+
+  walk(doc, 0, true)
+  map[textOffset] = doc.content.size   // sentinel for end-of-document
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (offset: number) => map[Math.min(Math.max(0, offset), map.length - 1)] ?? (doc as any).content.size
+}
+
 // ── Inline SVG icons (Heroicons 2 solid / outline) ───────────────────────
 
 function IconBold() {
@@ -633,24 +676,34 @@ export default function JournalEditor({
     setGrammarLoading(false)
   }
 
-  // Apply ALL remaining fixable matches at once (back-to-front to preserve offsets)
+  // Apply ALL remaining fixable matches at once.
+  // Fixes are applied back-to-front in a single ProseMirror transaction so each
+  // higher-offset replacement doesn't shift the positions of lower-offset ones.
+  // Using direct doc-position replacement preserves ALL paragraph / formatting structure.
   function applyGrammarFix() {
     if (!grammarResult || !editor) return
     const toApply = [...grammarResult.matches]
       .filter((m) => m.replacements.length > 0)
-      .sort((a, b) => b.offset - a.offset)
+      .sort((a, b) => b.offset - a.offset)   // back-to-front
 
-    let text = grammarResult.originalText
-    for (const m of toApply) {
-      text = text.slice(0, m.offset) + m.replacements[0].value + text.slice(m.offset + m.length)
-    }
+    // Build position map once from the current document
+    const docPos = buildGrammarPosMap(editor.state.doc)
 
-    const html = text.split("\n\n").map((line) => `<p>${line || ""}</p>`).join("")
-    editor.commands.setContent(html || "<p></p>")
+    editor.chain().focus().command(({ tr, state }) => {
+      for (const m of toApply) {
+        const from = docPos(m.offset)
+        const to   = docPos(m.offset + m.length)
+        if (from >= to) continue
+        tr.replaceWith(from, to, state.schema.text(m.replacements[0].value))
+      }
+      return true
+    }).run()
+
     setGrammarResult(null)
   }
 
-  // Apply a single match's top suggestion, then recalculate remaining offsets
+  // Apply a single match's top suggestion, then recalculate remaining offsets.
+  // Uses direct ProseMirror insertion to preserve paragraphs and formatting.
   function applyOneFix(idx: number) {
     if (!grammarResult || !editor) return
     const m = grammarResult.matches[idx]
@@ -659,13 +712,20 @@ export default function JournalEditor({
     const replacement = m.replacements[0].value
     const delta = replacement.length - m.length
 
-    // Splice the fix into the original text
+    const docPos = buildGrammarPosMap(editor.state.doc)
+    const from = docPos(m.offset)
+    const to   = docPos(m.offset + m.length)
+
+    if (from < to) {
+      editor.chain().focus().insertContentAt({ from, to }, replacement).run()
+    }
+
+    // Update remaining match offsets
     const newText =
       grammarResult.originalText.slice(0, m.offset) +
       replacement +
       grammarResult.originalText.slice(m.offset + m.length)
 
-    // Rebuild remaining matches — shift offsets that fall after the applied fix
     const newMatches = grammarResult.matches
       .filter((_, i) => i !== idx)
       .map((rem) => ({
@@ -673,13 +733,10 @@ export default function JournalEditor({
         offset: rem.offset > m.offset ? rem.offset + delta : rem.offset,
       }))
 
-    // Update editor content
-    const html = newText.split("\n\n").map((line) => `<p>${line || ""}</p>`).join("")
-    editor.commands.setContent(html || "<p></p>")
-
-    setGrammarResult(newMatches.length > 0
-      ? { matches: newMatches, originalText: newText }
-      : null
+    setGrammarResult(
+      newMatches.length > 0
+        ? { matches: newMatches, originalText: newText }
+        : null
     )
   }
 
