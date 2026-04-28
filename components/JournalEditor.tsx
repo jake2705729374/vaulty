@@ -1183,21 +1183,21 @@ export default function JournalEditor({
         {/* Voice dictation */}
         {dictationAvailable && (
           <button
-            onClick={handleDictateClick}
+            onClick={isRecording || isTranscribing ? undefined : handleDictateClick}
             disabled={isTranscribing}
-            title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing…" : "Voice dictation"}
+            title={isRecording ? "Recording — use the panel to stop" : isTranscribing ? "Transcribing…" : "Voice dictation"}
             className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors flex-shrink-0"
             style={{
               backgroundColor: (isRecording || isTranscribing) ? "rgba(239,68,68,0.1)" : "var(--color-surface-2)",
               color: (isRecording || isTranscribing) ? "#ef4444" : "var(--color-ink-muted)",
               border: `1px solid ${(isRecording || isTranscribing) ? "rgba(239,68,68,0.35)" : "var(--color-border)"}`,
-              opacity: isTranscribing ? 0.7 : 1,
+              cursor: (isRecording || isTranscribing) ? "default" : "pointer",
             }}
             onMouseEnter={(e) => { if (!isRecording && !isTranscribing) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
             onMouseLeave={(e) => { if (!isRecording && !isTranscribing) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
           >
             <IconMic active={isRecording || isTranscribing} />
-            <span>{isRecording ? "Stop" : isTranscribing ? "…" : "Dictate"}</span>
+            <span>{isRecording ? "Recording…" : isTranscribing ? "…" : "Dictate"}</span>
           </button>
         )}
 
@@ -1563,47 +1563,47 @@ export default function JournalEditor({
           {/* ── Recording — waveform + timer ────────────────────────────── */}
           {isRecording && (
             <div
-              className="rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg"
+              className="rounded-xl overflow-hidden shadow-lg"
               style={{ backgroundColor: "var(--color-surface)", border: "1px solid rgba(239,68,68,0.35)" }}
             >
-              {/* Animated waveform bars */}
-              <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
-                {[8, 14, 18, 12, 7].map((h, i) => (
-                  <span
-                    key={i}
-                    className="block rounded-full animate-pulse"
-                    style={{
-                      width: 3,
-                      height: h,
-                      backgroundColor: "#ef4444",
-                      animationDuration: `${0.65 + i * 0.15}s`,
-                      animationDelay: `${i * 0.1}s`,
-                    }}
-                  />
-                ))}
+              {/* Top row: waveform + timer */}
+              <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+                <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
+                  {[8, 14, 18, 12, 7].map((h, i) => (
+                    <span
+                      key={i}
+                      className="block rounded-full animate-pulse"
+                      style={{
+                        width: 3,
+                        height: h,
+                        backgroundColor: "#ef4444",
+                        animationDuration: `${0.65 + i * 0.15}s`,
+                        animationDelay: `${i * 0.1}s`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>
+                    Recording
+                  </p>
+                  <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
+                    {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                  </p>
+                </div>
               </div>
-
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>
-                  Recording
-                </p>
-                <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
-                  {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
-                </p>
-                <p className="text-[10px] font-inter mt-0.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                  Tap Stop when finished speaking
-                </p>
-              </div>
-
+              {/* Stop button */}
               <button
                 onClick={stopDictation}
-                title="Stop recording"
-                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-colors"
-                style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "#ef4444" }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.22)"}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.12)"}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-inter font-semibold transition-colors"
+                style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444", borderTop: "1px solid rgba(239,68,68,0.2)" }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.18)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.1)"}
               >
-                <IconXMark />
+                <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+                  <rect x="4" y="4" width="12" height="12" rx="2" />
+                </svg>
+                Stop Recording
               </button>
             </div>
           )}
@@ -2016,29 +2016,33 @@ export default function JournalEditor({
 
             {/* Recording — waveform + timer */}
             {isRecording && (
-              <div className="rounded-xl px-4 py-3 flex items-center gap-3"
+              <div className="rounded-xl overflow-hidden"
                 style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid rgba(239,68,68,0.35)" }}>
-                <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
-                  {[8, 14, 18, 12, 7].map((h, i) => (
-                    <span key={i} className="block rounded-full animate-pulse"
-                      style={{ width: 3, height: h, backgroundColor: "#ef4444", animationDuration: `${0.65 + i * 0.15}s`, animationDelay: `${i * 0.1}s` }} />
-                  ))}
+                {/* Top row: waveform + timer */}
+                <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+                  <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
+                    {[8, 14, 18, 12, 7].map((h, i) => (
+                      <span key={i} className="block rounded-full animate-pulse"
+                        style={{ width: 3, height: h, backgroundColor: "#ef4444", animationDuration: `${0.65 + i * 0.15}s`, animationDelay: `${i * 0.1}s` }} />
+                    ))}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Recording</p>
+                    <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
+                      {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Recording</p>
-                  <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
-                    {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
-                  </p>
-                  <p className="text-[10px] font-inter mt-0.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                    Click Stop when finished speaking
-                  </p>
-                </div>
-                <button onClick={stopDictation} title="Stop recording"
-                  className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-colors"
-                  style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "#ef4444" }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.22)"}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.12)"}>
-                  <IconXMark />
+                {/* Stop button */}
+                <button onClick={stopDictation}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-inter font-semibold transition-colors"
+                  style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444", borderTop: "1px solid rgba(239,68,68,0.2)" }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.18)"}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.1)"}>
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13">
+                    <rect x="4" y="4" width="12" height="12" rx="2" />
+                  </svg>
+                  Stop Recording
                 </button>
               </div>
             )}
