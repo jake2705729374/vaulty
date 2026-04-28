@@ -42,6 +42,7 @@ model User {
   memories         Memory[]
   sessionSummaries SessionSummary[]
   habits           Habit[]
+  coachSessions    CoachSession[]
 }
 
 // Journal entries — ciphertext only, never plaintext
@@ -217,6 +218,32 @@ model HabitLog {
 
   @@unique([habitId, date])
   @@index([userId, date])
+}
+
+// ── Standalone coach chat sessions (the /coach page) ─────────────────────────
+model CoachSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("New conversation")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages CoachSessionMessage[]
+
+  @@index([userId, createdAt])
+}
+
+model CoachSessionMessage {
+  id        String       @id @default(cuid())
+  sessionId String
+  role      String       // "user" | "assistant"
+  content   String
+  createdAt DateTime     @default(now())
+
+  session   CoachSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 // NextAuth sessions
