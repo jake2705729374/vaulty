@@ -191,6 +191,13 @@ export default function SettingsPage() {
   const [pwSuccess,    setPwSuccess]    = useState(false)
   const [pwShow,       setPwShow]       = useState([false, false, false])
 
+  // Account deletion
+  const [showDeleteModal,  setShowDeleteModal]  = useState(false)
+  const [deletePassword,   setDeletePassword]   = useState("")
+  const [deleteLoading,    setDeleteLoading]    = useState(false)
+  const [deleteError,      setDeleteError]      = useState("")
+  const [deleteShowPw,     setDeleteShowPw]     = useState(false)
+
   // Sync picker state when customColors changes (e.g. on initial load)
   useEffect(() => {
     if (customColors) {
@@ -441,6 +448,35 @@ export default function SettingsPage() {
       setPwError("An unexpected error occurred. Please try again.")
     } finally {
       setPwChanging(false)
+    }
+  }
+
+  async function handleDeleteAccount(e: React.FormEvent) {
+    e.preventDefault()
+    setDeleteError("")
+    if (!deletePassword) { setDeleteError("Please enter your password."); return }
+
+    setDeleteLoading(true)
+    try {
+      const res = await fetch("/api/user", {
+        method:  "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ password: deletePassword }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setDeleteError((data as { error?: string }).error ?? "Deletion failed. Please try again.")
+        return
+      }
+
+      // Wipe local session data then sign out
+      sessionStorage.removeItem("masterPassword")
+      window.location.href = "/api/auth/logout"
+    } catch {
+      setDeleteError("An unexpected error occurred. Please try again.")
+    } finally {
+      setDeleteLoading(false)
     }
   }
 
@@ -1411,6 +1447,42 @@ export default function SettingsPage() {
                   </svg>
                   Sign out
                 </button>
+
+                {/* Danger zone */}
+                <div
+                  className="mt-6 pt-5"
+                  style={{ borderTop: "1px solid var(--color-border)" }}
+                >
+                  <p className="text-xs font-inter font-semibold uppercase tracking-widest mb-1" style={{ color: "#dc2626" }}>
+                    Danger zone
+                  </p>
+                  <p className="text-xs text-ink-faint mb-3 font-inter">
+                    Permanently deletes your account, all journal entries, habits, coach history, and every other piece of data. This cannot be undone.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowDeleteModal(true); setDeleteError(""); setDeletePassword("") }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-inter font-medium transition-colors"
+                    style={{
+                      color: "#dc2626",
+                      border: "1px solid rgba(220,38,38,0.35)",
+                      backgroundColor: "rgba(220,38,38,0.08)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.15)"
+                      e.currentTarget.style.borderColor     = "rgba(220,38,38,0.55)"
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "rgba(220,38,38,0.08)"
+                      e.currentTarget.style.borderColor     = "rgba(220,38,38,0.35)"
+                    }}
+                  >
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                      <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193v-.443A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+                    </svg>
+                    Delete my account
+                  </button>
+                </div>
               </SectionCard>
 
             </div>
@@ -1470,6 +1542,105 @@ export default function SettingsPage() {
                 I understand, enable
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete account modal ─────────────────────────────────────────── */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0"
+            style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+            onClick={() => !deleteLoading && setShowDeleteModal(false)}
+          />
+          {/* Modal */}
+          <div
+            className="relative w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+            style={{ background: "var(--color-surface)", border: "1px solid rgba(220,38,38,0.3)" }}
+          >
+            {/* Icon */}
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center mb-4"
+              style={{ background: "rgba(220,38,38,0.12)" }}
+            >
+              <svg viewBox="0 0 20 20" fill="#dc2626" width="18" height="18">
+                <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+              </svg>
+            </div>
+
+            <h3 className="text-base font-sora font-bold text-ink mb-1">Delete your account?</h3>
+            <p className="text-sm font-inter leading-relaxed mb-4" style={{ color: "var(--color-ink-muted)" }}>
+              This permanently erases <strong className="text-ink">everything</strong> — all journal entries, coach sessions, habits, memories, and your account. There is no recovery.
+            </p>
+
+            <form onSubmit={handleDeleteAccount} className="space-y-3">
+              <div>
+                <label className="block text-xs font-inter font-medium mb-1.5" style={{ color: "var(--color-ink-muted)" }}>
+                  Enter your password to confirm
+                </label>
+                <div className="relative">
+                  <input
+                    type={deleteShowPw ? "text" : "password"}
+                    value={deletePassword}
+                    onChange={(e) => { setDeletePassword(e.target.value); setDeleteError("") }}
+                    placeholder="Your password"
+                    autoComplete="current-password"
+                    disabled={deleteLoading}
+                    className="w-full px-3 py-2.5 pr-10 rounded-xl text-sm font-inter focus:outline-none"
+                    style={{
+                      background: "var(--color-surface-2)",
+                      border: deleteError ? "1px solid rgba(220,38,38,0.6)" : "1px solid var(--color-border)",
+                      color: "var(--color-ink)",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDeleteShowPw((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: "var(--color-ink-faint)" }}
+                    tabIndex={-1}
+                  >
+                    {deleteShowPw ? (
+                      <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41ZM14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" clipRule="evenodd"/></svg>
+                    ) : (
+                      <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path fillRule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22ZM7.752 6.69l1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z" clipRule="evenodd"/><path d="M10.748 13.93a4 4 0 0 1-4.687-4.687l-2.835-2.836a10.006 10.006 0 0 0-1.77 3.694 1.65 1.65 0 0 0 0 1.186A10.004 10.004 0 0 0 9.999 17c.396 0 .787-.022 1.17-.064l-.421-.422Z"/></svg>
+                    )}
+                  </button>
+                </div>
+                {deleteError && (
+                  <p className="mt-1.5 text-xs font-inter" style={{ color: "#dc2626" }}>{deleteError}</p>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={deleteLoading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-inter font-medium transition-colors"
+                  style={{
+                    background: "var(--color-surface-2)",
+                    border: "1px solid var(--color-border)",
+                    color: "var(--color-ink-muted)",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deleteLoading || !deletePassword}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-inter font-semibold text-white transition-opacity"
+                  style={{
+                    background: "#dc2626",
+                    opacity: deleteLoading || !deletePassword ? 0.5 : 1,
+                  }}
+                >
+                  {deleteLoading ? "Deleting…" : "Delete everything"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
