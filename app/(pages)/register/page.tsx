@@ -6,21 +6,8 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import AuthNav from "@/components/AuthNav"
-
-// ── Password strength ────────────────────────────────────────────────────────
-function getStrength(pw: string): { score: number; label: string; color: string } {
-  let score = 0
-  if (pw.length >= 8)           score++
-  if (pw.length >= 12)          score++
-  if (/[A-Z]/.test(pw))        score++
-  if (/[0-9]/.test(pw))        score++
-  if (/[^A-Za-z0-9]/.test(pw)) score++
-
-  if (score <= 1) return { score, label: "Weak",        color: "#EF4444" }
-  if (score <= 3) return { score, label: "Fair",        color: "#F59E0B" }
-  if (score === 4) return { score, label: "Strong",     color: "#22C55E" }
-  return                { score, label: "Very strong",  color: "#10B981" }
-}
+import PasswordStrengthMeter from "@/components/PasswordStrengthMeter"
+import { getPasswordStrength } from "@/lib/password-strength"
 
 const RESEND_COOLDOWN = 60 // seconds
 
@@ -50,7 +37,7 @@ function RegisterForm() {
   // True when arriving from the login page (?verify=1) — no password in state
   const [fromLogin, setFromLogin] = useState(false)
 
-  const strength       = useMemo(() => getStrength(password), [password])
+  const strength       = useMemo(() => getPasswordStrength(password), [password])
   const passwordsMatch = confirm.length > 0 && password === confirm
 
   // Refs for OTP boxes
@@ -95,8 +82,8 @@ function RegisterForm() {
     e.preventDefault()
     setError("")
 
-    if (password !== confirm) { setError("Passwords do not match."); return }
-    if (password.length < 8)  { setError("Password must be at least 8 characters."); return }
+    if (password !== confirm)    { setError("Passwords do not match."); return }
+    if (!strength.isAcceptable)  { setError(strength.isCommon ? "That password is too common. Choose something more unique." : "Please choose a stronger password — meet at least 3 of the 4 requirements shown."); return }
 
     setLoading(true)
     const res = await fetch("/api/auth/register", {
@@ -342,19 +329,8 @@ function RegisterForm() {
                       </button>
                     </div>
                     {password.length > 0 && (
-                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-1.5">
-                        <div className="flex gap-1">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <div
-                              key={i}
-                              className="h-1 flex-1 rounded-full transition-all duration-300"
-                              style={{ background: i < strength.score ? strength.color : "rgba(255,255,255,0.1)" }}
-                            />
-                          ))}
-                        </div>
-                        <span className="text-xs" style={{ color: strength.color, fontFamily: "var(--font-inter)" }}>
-                          {strength.label}
-                        </span>
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                        <PasswordStrengthMeter password={password} variant="dark" />
                       </motion.div>
                     )}
                   </div>

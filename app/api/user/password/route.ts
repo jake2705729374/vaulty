@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import bcrypt from "bcryptjs"
+import { validatePasswordServer } from "@/lib/password-strength"
 
 /**
  * PUT /api/user/password
@@ -33,9 +34,8 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
   }
 
-  if (newPassword.length < 8) {
-    return NextResponse.json({ error: "New password must be at least 8 characters" }, { status: 400 })
-  }
+  const pwError = validatePasswordServer(newPassword)
+  if (pwError) return NextResponse.json({ error: pwError }, { status: 400 })
 
   const user = await prisma.user.findUnique({ where: { id: session.user.id } })
   if (!user) {

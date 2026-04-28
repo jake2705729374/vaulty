@@ -4,6 +4,7 @@ import { createHash, randomInt } from "crypto"
 import { prisma } from "@/lib/db"
 import { sendVerificationEmail } from "@/lib/email"
 import { rateLimit } from "@/lib/rate-limit"
+import { validatePasswordServer } from "@/lib/password-strength"
 
 function generateCode(): { code: string; hash: string; exp: Date } {
   const code = String(randomInt(100000, 1000000))
@@ -19,9 +20,11 @@ export async function POST(req: NextRequest) {
   const { email: rawEmail, password } = await req.json()
   const email = rawEmail?.trim().toLowerCase()
 
-  if (!email || !password || password.length < 8) {
+  if (!email || !password) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 })
   }
+  const pwError = validatePasswordServer(password)
+  if (pwError) return NextResponse.json({ error: pwError }, { status: 400 })
 
   const existing = await prisma.user.findUnique({ where: { email } })
 

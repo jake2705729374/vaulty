@@ -7,8 +7,10 @@ import Link from "next/link"
 import { useTheme } from "@/components/ThemeProvider"
 import { BirthdayPicker } from "@/components/BirthdayPicker"
 import PageTransition from "@/components/PageTransition"
+import PasswordStrengthMeter from "@/components/PasswordStrengthMeter"
 import { QUOTE_CATEGORIES } from "@/lib/quotes"
 import { unlockMek, rewrapMek, type KeyBundle } from "@/lib/crypto"
+import { getPasswordStrength } from "@/lib/password-strength"
 
 type ColorTheme = "PARCHMENT" | "SLATE" | "ROSE" | "FOREST" | "MIDNIGHT" | "VAULT" | "CUSTOM"
 type DarkMode = "SYSTEM" | "LIGHT" | "DARK"
@@ -394,7 +396,8 @@ export default function SettingsPage() {
     setPwSuccess(false)
 
     if (!pwCurrent || !pwNew || !pwConfirm) { setPwError("All fields are required."); return }
-    if (pwNew.length < 8)                    { setPwError("New password must be at least 8 characters."); return }
+    const newStrength = getPasswordStrength(pwNew)
+    if (!newStrength.isAcceptable)           { setPwError(newStrength.isCommon ? "That password is too common. Choose something more unique." : "New password must meet at least 3 of the 4 requirements shown below."); return }
     if (pwNew !== pwConfirm)                 { setPwError("New passwords do not match."); return }
     if (pwNew === pwCurrent)                 { setPwError("New password must differ from the current one."); return }
 
@@ -1384,6 +1387,8 @@ export default function SettingsPage() {
                           )}
                         </button>
                       </div>
+                      {/* Strength meter — only on the new password field */}
+                      {idx === 1 && <PasswordStrengthMeter password={pwNew} variant="light" />}
                     </div>
                   ))}
 
