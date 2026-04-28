@@ -8,35 +8,33 @@ function Particle({ x, delay, duration }: { x: number; delay: number; duration: 
   return (
     <motion.circle
       cx={x}
-      cy={60}
+      cy={62}
       r={2.5}
       fill="#2563EB"
-      initial={{ opacity: 0, cy: 60 }}
-      animate={{ opacity: [0, 0.7, 0], cy: [60, 20, 5] }}
+      initial={{ opacity: 0, cy: 62 }}
+      animate={{ opacity: [0, 0.7, 0], cy: [62, 22, 8] }}
       transition={{ delay, duration, ease: "easeOut", repeat: Infinity, repeatDelay: 3 }}
     />
   )
 }
 
 // ── Animated vault lock ───────────────────────────────────────────────────────
+// All elements centered on x=60 within a 120×140 viewBox.
 function VaultLock() {
   return (
     <motion.div
+      className="flex items-center justify-center"
       initial={{ scale: 0.7, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ duration: 0.6, ease: [0.34, 1.36, 0.64, 1] }}
-      className="relative"
     >
-      {/* Glow ring */}
-      <motion.div
-        className="absolute inset-0 rounded-full"
+      {/* Glow behind the lock */}
+      <div
+        className="absolute w-40 h-40 rounded-full pointer-events-none"
         style={{
-          background: "radial-gradient(circle, rgba(37,99,235,0.25) 0%, transparent 70%)",
-          filter: "blur(20px)",
+          background: "radial-gradient(circle, rgba(37,99,235,0.22) 0%, transparent 70%)",
+          filter: "blur(24px)",
         }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: [0, 1, 0.6] }}
-        transition={{ duration: 1.8, times: [0, 0.4, 1] }}
       />
 
       <svg
@@ -46,50 +44,53 @@ function VaultLock() {
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/* Floating particles rising from the lock */}
-        <Particle x={35} delay={1.2} duration={2.2} />
+        {/* Particles — symmetric around x=60 */}
+        <Particle x={30} delay={1.2} duration={2.2} />
         <Particle x={60} delay={0.8} duration={2.6} />
-        <Particle x={85} delay={1.5} duration={2.0} />
+        <Particle x={90} delay={1.5} duration={2.0} />
 
-        {/* Shackle (top arc) — opens upward over time */}
+        {/* ── Shackle: draw-in pass (stays while drawing) ── */}
+        {/* Arc centered at x=60: legs at x=30 and x=90, apex at y=16 */}
         <motion.path
-          d="M36 68V48C36 31.4 49.4 18 66 18C82.6 18 96 31.4 96 48V68"
+          d="M30 70V46a30 30 0 0 1 60 0V70"
           stroke="#2563EB"
           strokeWidth="9"
           strokeLinecap="round"
+          fill="none"
           initial={{ pathLength: 0, opacity: 0 }}
           animate={{ pathLength: 1, opacity: 1 }}
           transition={{ duration: 0.9, ease: "easeOut", delay: 0.1 }}
         />
 
-        {/* Shackle lifts open after drawing in */}
+        {/* ── Shackle: lift-and-fade pass (overlaid, animates upward after 1.6 s) ── */}
         <motion.path
-          d="M36 68V48C36 31.4 49.4 18 66 18C82.6 18 96 31.4 96 48V68"
+          d="M30 70V46a30 30 0 0 1 60 0V70"
           stroke="#2563EB"
           strokeWidth="9"
           strokeLinecap="round"
+          fill="none"
           initial={{ y: 0, opacity: 1 }}
-          animate={{ y: -14, opacity: [1, 1, 0] }}
-          transition={{ duration: 1.0, ease: "easeInOut", delay: 1.6, times: [0, 0.6, 1] }}
+          animate={{ y: -16, opacity: [1, 1, 0] }}
+          transition={{ duration: 1.0, ease: "easeInOut", delay: 1.6, times: [0, 0.55, 1] }}
         />
 
-        {/* Lock body */}
+        {/* ── Lock body ── */}
         <motion.rect
-          x="16"
-          y="65"
-          width="88"
+          x="15"
+          y="66"
+          width="90"
           height="62"
           rx="12"
-          fill="rgba(37,99,235,0.15)"
+          fill="rgba(37,99,235,0.13)"
           stroke="#2563EB"
           strokeWidth="3"
-          initial={{ opacity: 0, scaleY: 0.6 }}
+          initial={{ opacity: 0, scaleY: 0.55 }}
           animate={{ opacity: 1, scaleY: 1 }}
-          style={{ transformOrigin: "50% 100%" }}
+          style={{ transformOrigin: "60px 128px" }}
           transition={{ duration: 0.5, ease: "easeOut", delay: 0.5 }}
         />
 
-        {/* Keyhole circle */}
+        {/* ── Keyhole circle ── */}
         <motion.circle
           cx="60"
           cy="91"
@@ -101,7 +102,7 @@ function VaultLock() {
           transition={{ duration: 0.4, ease: "backOut", delay: 0.85 }}
         />
 
-        {/* Keyhole slot */}
+        {/* ── Keyhole slot ── */}
         <motion.rect
           x="56.5"
           y="96"
@@ -114,9 +115,9 @@ function VaultLock() {
           transition={{ duration: 0.3, delay: 1.0 }}
         />
 
-        {/* Checkmark that fades in after the shackle opens */}
+        {/* ── Checkmark (fades in after shackle lifts) ── */}
         <motion.path
-          d="M42 96l12 12 24-20"
+          d="M42 95l11 12 25-21"
           stroke="#22C55E"
           strokeWidth="5"
           strokeLinecap="round"
@@ -142,7 +143,7 @@ export default function AccountDeletedPage() {
       <div
         className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full"
         style={{
-          background: "radial-gradient(circle, rgba(37,99,235,0.1) 0%, transparent 70%)",
+          background: "radial-gradient(circle, rgba(37,99,235,0.09) 0%, transparent 70%)",
           filter: "blur(60px)",
         }}
       />
@@ -150,7 +151,7 @@ export default function AccountDeletedPage() {
       <div className="relative z-10 flex flex-col items-center max-w-md">
 
         {/* Animated lock */}
-        <div className="mb-8">
+        <div className="relative mb-8">
           <VaultLock />
         </div>
 
@@ -199,7 +200,6 @@ export default function AccountDeletedPage() {
           animate={{ opacity: 1 }}
           transition={{ delay: 1.2, duration: 0.5 }}
         >
-          {/* Envelope icon */}
           <svg
             viewBox="0 0 20 20"
             fill="none"
@@ -237,17 +237,35 @@ export default function AccountDeletedPage() {
               boxShadow: "0 0 20px rgba(37,99,235,0.35)",
               fontFamily: "var(--font-inter)",
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = "0 0 36px rgba(37,99,235,0.65)"
+              e.currentTarget.style.opacity   = "0.92"
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(37,99,235,0.35)"
+              e.currentTarget.style.opacity   = "1"
+            }}
           >
             Start fresh
           </Link>
           <Link
             href="/"
-            className="flex-1 py-3 rounded-xl text-sm font-medium text-center transition-colors"
+            className="flex-1 py-3 rounded-xl text-sm font-medium text-center transition-colors duration-200"
             style={{
               background: "rgba(255,255,255,0.04)",
               border: "1px solid rgba(255,255,255,0.1)",
               color: "#8B8BA7",
               fontFamily: "var(--font-inter)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background   = "rgba(255,255,255,0.09)"
+              e.currentTarget.style.borderColor  = "rgba(255,255,255,0.2)"
+              e.currentTarget.style.color        = "#c0c0d0"
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background   = "rgba(255,255,255,0.04)"
+              e.currentTarget.style.borderColor  = "rgba(255,255,255,0.1)"
+              e.currentTarget.style.color        = "#8B8BA7"
             }}
           >
             Back to home

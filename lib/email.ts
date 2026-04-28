@@ -215,7 +215,6 @@ export async function sendAccountDeletionEmail(
     html: emailShell(`
       <tr><td style="padding:32px 32px 0;text-align:center;">
         <div style="display:inline-block;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:20px;line-height:48px;text-align:center;font-size:24px;font-weight:800;color:#fff;font-family:Georgia,serif;vertical-align:middle;">V</div>
-        <div style="font-size:28px;margin-bottom:12px;">💙</div>
         <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">${greeting}</h1>
         <p style="margin:0;font-size:15px;color:#6b7280;line-height:1.6;">We're really sad to see you go.</p>
       </td></tr>
