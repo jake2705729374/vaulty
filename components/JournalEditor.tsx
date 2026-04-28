@@ -8,39 +8,12 @@ import CoachPanel, { type CoachContext } from "@/components/CoachPanel"
 import HabitsPanel from "@/components/HabitsPanel"
 import { encryptWithMek, decryptWithMek } from "@/lib/crypto"
 
-// ── SpeechRecognition minimal types (not in all TS DOM targets) ──────────
-interface SpeechResultItem { transcript: string }
-interface SpeechResultEntry {
-  isFinal: boolean
-  readonly length: number
-  [index: number]: SpeechResultItem
-}
-interface SpeechResultList {
-  readonly length: number
-  [index: number]: SpeechResultEntry
-}
-interface SpeechRecognitionEvt {
-  resultIndex: number
-  results: SpeechResultList
-}
-interface SpeechErrorEvt { error: string; message?: string }
-interface SpeechRecognitionInstance {
-  continuous: boolean
-  interimResults: boolean
-  lang: string
-  onresult: ((event: SpeechRecognitionEvt) => void) | null
-  onend: (() => void) | null
-  onerror: ((event: SpeechErrorEvt) => void) | null
-  start(): void
-  stop(): void
-}
-type SpeechRecognitionCtor = new () => SpeechRecognitionInstance
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionCtor
-    webkitSpeechRecognition?: SpeechRecognitionCtor
-  }
+// ── Dictation mime-type helper ────────────────────────────────────────────
+function getDictationMimeType(): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!(window as any).MediaRecorder) return ""
+  const types = ["audio/webm", "audio/mp4", "audio/ogg;codecs=opus", "audio/ogg"]
+  return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? ""
 }
 
 // ── Inline SVG icons (Heroicons 2 solid / outline) ───────────────────────
@@ -324,17 +297,15 @@ export default function JournalEditor({
   const captionSavingRef   = useRef(false)  // prevent concurrent saves
   const captionTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
-  // Voice dictation
-  const recognitionRef  = useRef<SpeechRecognitionInstance | null>(null)
-  const isListeningRef  = useRef(false)   // true = we WANT to be listening (drives auto-restart)
-  const editorRef       = useRef<Editor | null>(null)  // stable ref so closures always see latest editor
-  const [isListening,        setIsListening]        = useState(false)
-  const [interimText,        setInterimText]        = useState("")
-  const [dictationSupported, setDictationSupported] = useState(false)
-  const [dictationError,     setDictationError]     = useState<string | null>(null)
-  const [dictationStatus,    setDictationStatus]    = useState<string>("Listening… speak now")
-  const [dictationPhase,     setDictationPhase]     = useState<"idle" | "prompting" | "active">("idle")
-  const [dictationBrowser,   setDictationBrowser]   = useState("")
+  // Voice dictation — MediaRecorder → Whisper API
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const editorRef         = useRef<Editor | null>(null)  // stable ref so closures always see latest editor
+  const [isRecording,       setIsRecording]       = useState(false)
+  const [isTranscribing,    setIsTranscribing]    = useState(false)
+  const [dictationAvailable, setDictationAvailable] = useState(false)
+  const [dictationError,    setDictationError]    = useState<string | null>(null)
+  const [recordingSeconds,  setRecordingSeconds]  = useState(0)
 
   // Grammar check
   const [grammarLoading, setGrammarLoading] = useState(false)
@@ -374,8 +345,8 @@ export default function JournalEditor({
   // Stop dictation on unmount
   useEffect(() => {
     return () => {
-      isListeningRef.current = false
-      recognitionRef.current?.stop()
+      try { mediaRecorderRef.current?.stop() } catch { /* */ }
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -449,11 +420,14 @@ export default function JournalEditor({
     el.style.height = `${el.scrollHeight}px`
   }, [captionText])
 
-  // Feature-detect Speech API after mount
+  // Feature-detect MediaRecorder + getUserMedia after mount
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setDictationSupported(!!(window.SpeechRecognition || window.webkitSpeechRecognition))
-    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!!(window as any).MediaRecorder && !!navigator.mediaDevices) {
+        setDictationAvailable(true)
+      }
+    } catch { /* SSR */ }
   }, [])
 
   // Check for a recoverable local draft (new entries only — initialContent is empty)
@@ -555,281 +529,84 @@ export default function JournalEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mood])
 
-  // ── Voice dictation ──────────────────────────────────────────────────
+  // ── Voice dictation — MediaRecorder → Whisper API ───────────────────────
 
-  // Replace spoken punctuation words with their symbols
-  function processDictation(raw: string): string {
-    return raw
-      .replace(/\bperiod\b/gi,                   ".")
-      .replace(/\bcomma\b/gi,                    ",")
-      .replace(/\bquestion mark\b/gi,            "?")
-      .replace(/\bexclamation (mark|point)\b/gi, "!")
-      .replace(/\bcolon\b/gi,                    ":")
-      .replace(/\bsemicolon\b/gi,                ";")
-      .replace(/\bdash\b/gi,                     "—")
-      .replace(/\bellipsis\b/gi,                 "…")
-      .replace(/\bnew (line|paragraph)\b/gi,     "\n")
-      .replace(/\bopen (quote|quotes)\b/gi,      "\u201C")
-      .replace(/\bclose (quote|quotes)\b/gi,     "\u201D")
-  }
-
-  // ── Browser detection for dictation prompts ──────────────────────────────
-  function detectBrowser(): string {
-    if (typeof navigator === "undefined") return "your browser"
-    const ua     = navigator.userAgent
-    const vendor = navigator.vendor ?? ""
-    // iOS devices first — Chrome/Firefox on iOS still have "Safari" in their UA
-    if (/iPhone|iPad|iPod/i.test(ua)) {
-      if (/CriOS/i.test(ua))  return "Chrome on iPhone"
-      if (/FxiOS/i.test(ua))  return "Firefox on iPhone"
-      if (/EdgiOS/i.test(ua)) return "Edge on iPhone"
-      return "Safari on iPhone"
-    }
-    if (/Edg\//i.test(ua))                               return "Edge"
-    // Opera GX and Opera both carry OPR/ — we can't tell them apart from UA alone
-    if (/OPR\/|Opera/i.test(ua))                         return "Opera GX"
-    if (/Firefox/i.test(ua))                             return "Firefox"
-    if (/SamsungBrowser/i.test(ua))                      return "Samsung Browser"
-    if (/Chrome/i.test(ua) && /Google Inc/.test(vendor)) return "Chrome"
-    if (/Safari/i.test(ua) && /Apple/.test(vendor))      return "Safari"
-    return "your browser"
-  }
-
-  // Where the browser shows the mic permission UI — many don't use a modal
-  function micPromptLocation(browser: string): string {
-    if (browser === "Opera GX")   return "the lock icon (🔒) in the address bar"
-    if (browser === "Chrome")     return "the address bar (look for a microphone icon)"
-    if (browser === "Edge")       return "the lock icon in the address bar"
-    if (browser === "Firefox")    return "a permission popup near the address bar"
-    if (browser === "Safari")     return "a dialog from Safari"
-    return "your browser's address bar or a popup"
-  }
-
-  // Browsers where webkitSpeechRecognition exists but the Google service is blocked
-  function srServiceBlocked(browser: string): boolean {
-    return browser === "Opera GX" || browser === "Opera" || browser === "Samsung Browser"
-  }
-
-  function micDeniedInstructions(browser: string): string {
-    if (browser === "Safari on iPhone")
-      return "Go to iPhone Settings → Safari → Microphone → Allow."
-    if (browser === "Chrome on iPhone")
-      return "Go to iPhone Settings → Chrome → Microphone → enable."
-    if (browser === "Opera GX")
-      return "Click the lock icon (🔒) in the address bar → Site Settings → Microphone → Allow."
-    if (browser === "Chrome")
-      return "Click the lock icon in the address bar → Microphone → Allow."
-    if (browser === "Firefox" || browser === "Firefox on iPhone")
-      return "Click the lock icon → Connection Secure → Microphone → Allow."
-    if (browser === "Safari")
-      return "Safari menu → Settings for This Website → Microphone → Allow."
-    if (browser === "Edge" || browser === "Edge on iPhone")
-      return "Click the lock icon → Microphone → Allow."
-    return "Allow microphone access in your browser settings for this site."
-  }
-
-  // ── Voice dictation (fresh approach) ────────────────────────────────────
-  //
-  // Step 1 — getUserMedia: explicitly requests mic permission via the Web API,
-  //   which is what triggers the system permission dialog on iOS Safari and
-  //   Android Chrome. Without this, SpeechRecognition.start() can silently fail
-  //   with no prompt shown to the user.
-  //
-  // Step 2 — SpeechRecognition: starts after permission is granted. Uses
-  //   continuous:false (one utterance at a time) which is reliable on iOS.
-  //   onend auto-restarts the session while isListeningRef is true.
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function startRecognitionSession(SR: any) {
-    if (!isListeningRef.current) return
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rec: any = new SR()
-    rec.continuous     = false   // iOS-safe: continuous:true is unreliable on iOS
-    rec.interimResults = true
-    rec.lang           = "en-US"
-
-    recognitionRef.current = rec
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rec.onresult = (event: any) => {
-      let interim   = ""
-      let finalText = ""
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = event.results[i][0].transcript
-        if (event.results[i].isFinal) finalText += t
-        else interim += t
-      }
-      setInterimText(interim)
-      if (finalText) {
-        setInterimText("")
-        const processed = processDictation(finalText.trimStart())
-        const ed = editorRef.current
-        if (ed) {
-          ed.commands.focus()
-          if (processed.includes("\n")) {
-            processed.split("\n").forEach((chunk, ci) => {
-              if (ci > 0) ed.commands.setHardBreak()
-              if (chunk) ed.commands.insertContent(chunk)
-            })
-          } else {
-            ed.commands.insertContent(processed + " ")
-          }
-        }
-      }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rec.onerror = (event: any) => {
-      const err: string = event.error
-      const browser = dictationBrowser || detectBrowser()
-      if (err === "no-speech") return   // benign; onend will auto-restart
-      if (err === "not-allowed" || err === "service-not-allowed") {
-        setDictationError(
-          srServiceBlocked(browser)
-            ? `${browser} blocks Google's speech service. Use Chrome or Safari for voice dictation.`
-            : `Microphone access denied. ${micDeniedInstructions(browser)}`
-        )
-      } else if (err === "audio-capture") {
-        setDictationError("No microphone found on this device.")
-      } else if (err === "network") {
-        setDictationError(
-          srServiceBlocked(browser)
-            ? `${browser} blocks Google's speech service that voice dictation needs. Use Chrome or Safari instead.`
-            : "Voice recognition requires an internet connection."
-        )
-      } else {
-        setDictationError(`Voice recognition error: "${err}". Try Chrome or Safari if this persists.`)
-      }
-      isListeningRef.current = false
-      setIsListening(false)
-      setInterimText("")
-      setDictationPhase("idle")
-      recognitionRef.current = null
-    }
-
-    rec.onend = () => {
-      setInterimText("")
-      recognitionRef.current = null
-      if (isListeningRef.current) {
-        // Auto-restart loop — iOS fires onend after each utterance
-        setDictationStatus("Listening… speak now")
-        setTimeout(() => startRecognitionSession(SR), 80)
-        return
-      }
-      setDictationStatus("Listening… speak now")
-      setDictationPhase("idle")
-      setIsListening(false)
-    }
-
-    try {
-      rec.start()
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "unknown error"
-      setDictationError(`Could not start voice recognition: ${msg}`)
-      isListeningRef.current = false
-      setIsListening(false)
-      recognitionRef.current = null
-    }
-  }
-
-  // getUserMedia → prompt user → permission dialog → SpeechRecognition
-  async function requestPermissionAndStart() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).webkitSpeechRecognition ?? (window as any).SpeechRecognition
-    const browser = detectBrowser()
-    setDictationBrowser(browser)
+  async function startDictation() {
     setDictationError(null)
-
-    if (!SR) {
-      setDictationError(
-        browser === "Firefox"
-          ? "Firefox doesn't support voice dictation. Use Chrome or Safari instead."
-          : `Voice dictation isn't supported in ${browser}. Try Chrome or Safari.`
-      )
-      return
-    }
-
-    // Opera GX (and other non-Chrome Chromium browsers) have webkitSpeechRecognition
-    // available but block the Google speech-recognition service it depends on.
-    // Warn upfront rather than letting the user grant mic access and then fail silently.
-    if (srServiceBlocked(browser)) {
-      setDictationError(
-        `${browser} blocks Google's speech service that voice dictation requires. ` +
-        `Voice dictation works in Chrome or Safari on desktop, or Safari on iPhone.`
-      )
-      return
-    }
-
-    // Check existing permission state so we know how to proceed
-    let permState: PermissionState = "prompt"
     try {
-      const result = await navigator.permissions.query({ name: "microphone" as PermissionName })
-      permState = result.state
-    } catch {
-      // Permissions API not available — fall through to getUserMedia
-    }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      const mimeType = getDictationMimeType()
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const chunks: Blob[] = []
+      mediaRecorderRef.current = mr
 
-    // Already denied — show instructions immediately, no point calling getUserMedia
-    if (permState === "denied") {
-      setDictationError(`Microphone access is blocked. ${micDeniedInstructions(browser)}`)
-      return
-    }
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
 
-    // Phase 1 — show the "watch for the prompt" card before the system dialog fires
-    setDictationPhase("prompting")
-    setIsListening(true)
-
-    if (permState !== "granted") {
-      // Need getUserMedia to trigger the browser's permission dialog.
-      // Many browsers (Opera, Chrome) show this as an address-bar icon, not a modal.
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setDictationError("Microphone access requires HTTPS. Make sure the page is served securely.")
-        setIsListening(false)
-        setDictationPhase("idle")
-        return
-      }
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      mr.onstop = async () => {
+        // Stop all tracks so browser mic indicator clears
         stream.getTracks().forEach((t) => t.stop())
-      } catch (err: unknown) {
-        const name = err instanceof Error ? err.name : ""
-        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-          setDictationError(`Microphone access denied. ${micDeniedInstructions(browser)}`)
-        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-          setDictationError("No microphone found on this device.")
-        } else {
-          const msg = err instanceof Error ? err.message : String(err)
-          setDictationError(`Microphone error: ${msg || "unknown"}`)
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current)
+          recordingTimerRef.current = null
         }
-        isListeningRef.current = false
-        setIsListening(false)
-        setDictationPhase("idle")
-        return
+        setIsRecording(false)
+        setIsTranscribing(true)
+
+        try {
+          const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" })
+          const ext  = mr.mimeType?.includes("mp4") ? "mp4"
+                     : mr.mimeType?.includes("ogg")  ? "ogg"
+                     : "webm"
+          const fd = new FormData()
+          fd.append("audio", blob, `dictation.${ext}`)
+
+          const res = await fetch("/api/transcribe", { method: "POST", body: fd })
+          if (!res.ok) throw new Error(await res.text())
+          const { text } = await res.json() as { text: string }
+
+          if (text?.trim()) {
+            const ed = editorRef.current
+            if (ed) {
+              ed.commands.focus()
+              ed.commands.insertContent(text.trim() + " ")
+            }
+          }
+        } catch {
+          setDictationError("Transcription failed. Please try again.")
+        } finally {
+          setIsTranscribing(false)
+          setRecordingSeconds(0)
+        }
+      }
+
+      // Collect data in 250 ms slices so we have chunks even if onstop fires late
+      mr.start(250)
+      setIsRecording(true)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1)
+      }, 1000)
+
+    } catch (err: unknown) {
+      const name = err instanceof Error ? err.name : ""
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setDictationError("Microphone access denied. Allow microphone access in your browser settings.")
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setDictationError("No microphone found on this device.")
+      } else {
+        const msg = err instanceof Error ? err.message : "unknown error"
+        setDictationError(`Could not access microphone: ${msg}`)
       }
     }
-
-    // Phase 2 — permission confirmed, begin speech recognition
-    isListeningRef.current = true
-    setDictationPhase("active")
-    setDictationStatus("Listening… speak now")
-    startRecognitionSession(SR)
   }
 
   function stopDictation() {
-    isListeningRef.current = false
-    const rec = recognitionRef.current
-    recognitionRef.current = null
-    try { rec?.stop() } catch { /* */ }
-    setIsListening(false)
-    setInterimText("")
-    setDictationPhase("idle")
-    setDictationStatus("Listening… speak now")
+    try { mediaRecorderRef.current?.stop() } catch { /* */ }
   }
 
   function handleDictateClick() {
-    if (isListening) stopDictation()
-    else void requestPermissionAndStart()
+    if (isRecording) stopDictation()
+    else if (!isTranscribing) void startDictation()
   }
 
   // ── Grammar check (LanguageTool) ─────────────────────────────────────
@@ -1404,21 +1181,23 @@ export default function JournalEditor({
         <div className="flex-1" />
 
         {/* Voice dictation */}
-        {dictationSupported && (
+        {dictationAvailable && (
           <button
             onClick={handleDictateClick}
-            title={isListening ? "Stop dictation" : "Voice dictation"}
+            disabled={isTranscribing}
+            title={isRecording ? "Stop recording" : isTranscribing ? "Transcribing…" : "Voice dictation"}
             className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors flex-shrink-0"
             style={{
-              backgroundColor: isListening ? "rgba(239,68,68,0.1)" : "var(--color-surface-2)",
-              color: isListening ? "#ef4444" : "var(--color-ink-muted)",
-              border: `1px solid ${isListening ? "rgba(239,68,68,0.35)" : "var(--color-border)"}`,
+              backgroundColor: (isRecording || isTranscribing) ? "rgba(239,68,68,0.1)" : "var(--color-surface-2)",
+              color: (isRecording || isTranscribing) ? "#ef4444" : "var(--color-ink-muted)",
+              border: `1px solid ${(isRecording || isTranscribing) ? "rgba(239,68,68,0.35)" : "var(--color-border)"}`,
+              opacity: isTranscribing ? 0.7 : 1,
             }}
-            onMouseEnter={(e) => { if (!isListening) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
-            onMouseLeave={(e) => { if (!isListening) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
+            onMouseEnter={(e) => { if (!isRecording && !isTranscribing) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
+            onMouseLeave={(e) => { if (!isRecording && !isTranscribing) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
           >
-            <IconMic active={isListening} />
-            <span>{isListening ? "Stop" : "Dictate"}</span>
+            <IconMic active={isRecording || isTranscribing} />
+            <span>{isRecording ? "Stop" : isTranscribing ? "…" : "Dictate"}</span>
           </button>
         )}
 
@@ -1753,7 +1532,7 @@ export default function JournalEditor({
 
       {/* ── Right-side floating panel: dictation + grammar ───────────────── */}
       {/* Mobile only (md:hidden) — on desktop this content moves into the right panel. */}
-      {(isListening || dictationError || grammarResult) && (
+      {(isRecording || isTranscribing || dictationError || grammarResult) && (
         <div
           className="md:hidden fixed z-[90] right-3 flex flex-col gap-2"
           style={{ top: "7rem", width: 300, maxHeight: "calc(100vh - 8rem)", overflowY: "auto" }}
@@ -1781,32 +1560,8 @@ export default function JournalEditor({
             </div>
           )}
 
-          {/* ── Phase: prompting — waiting for system permission dialog ──── */}
-          {isListening && dictationPhase === "prompting" && (
-            <div
-              className="rounded-xl px-4 py-3 shadow-lg"
-              style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}
-            >
-              {/* Browser badge */}
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
-                <span className="text-[10px] font-inter font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-faint)" }}>
-                  {dictationBrowser}
-                </span>
-              </div>
-              <p className="text-xs font-inter font-medium leading-snug" style={{ color: "var(--color-ink)" }}>
-                Look at <strong>{micPromptLocation(dictationBrowser)}</strong> and click <strong>Allow</strong>.
-              </p>
-              <p className="text-[10px] font-inter mt-1.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                {dictationBrowser === "Opera GX"
-                  ? "Opera GX: click the lock icon → Site Settings → Microphone → Allow."
-                  : "This permission only needs to be granted once per site."}
-              </p>
-            </div>
-          )}
-
-          {/* ── Phase: active — listening + waveform ────────────────────── */}
-          {isListening && dictationPhase === "active" && (
+          {/* ── Recording — waveform + timer ────────────────────────────── */}
+          {isRecording && (
             <div
               className="rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg"
               style={{ backgroundColor: "var(--color-surface)", border: "1px solid rgba(239,68,68,0.35)" }}
@@ -1830,19 +1585,19 @@ export default function JournalEditor({
 
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>
-                  {dictationBrowser}
+                  Recording
                 </p>
-                <p className="text-xs font-inter font-medium truncate" style={{ color: "#ef4444" }}>
-                  {interimText || dictationStatus}
+                <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
+                  {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
                 </p>
                 <p className="text-[10px] font-inter mt-0.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                  Say &ldquo;period&rdquo;, &ldquo;comma&rdquo;, &ldquo;new paragraph&rdquo;
+                  Tap Stop when finished speaking
                 </p>
               </div>
 
               <button
                 onClick={stopDictation}
-                title="Stop dictation"
+                title="Stop recording"
                 className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-colors"
                 style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "#ef4444" }}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.22)"}
@@ -1850,6 +1605,27 @@ export default function JournalEditor({
               >
                 <IconXMark />
               </button>
+            </div>
+          )}
+
+          {/* ── Transcribing — spinner ───────────────────────────────────── */}
+          {isTranscribing && (
+            <div
+              className="rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg"
+              style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+            >
+              <svg className="animate-spin flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ color: "var(--color-accent)" }}>
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>
+                  Transcribing
+                </p>
+                <p className="text-xs font-inter font-medium" style={{ color: "var(--color-ink)" }}>
+                  Converting speech to text…
+                </p>
+              </div>
             </div>
           )}
 
@@ -2208,13 +1984,13 @@ export default function JournalEditor({
     </div>{/* end editor column */}
 
       {/* ── Desktop right panel — only mounts when something is active ─── */}
-      {(isListening || dictationError || grammarResult || (showCoach && onToggleCoach) || showHabits) && (
+      {(isRecording || isTranscribing || dictationError || grammarResult || (showCoach && onToggleCoach) || showHabits) && (
       <div
         className="hidden md:flex flex-col border-l flex-shrink-0 sticky top-0"
         style={{ width: 360, height: "100vh", borderColor: "var(--color-border)", backgroundColor: "var(--color-surface)" }}
       >
         {/* Grammar / dictation takes over the right panel when active */}
-        {(isListening || dictationError || grammarResult) ? (
+        {(isRecording || isTranscribing || dictationError || grammarResult) ? (
           <div className="flex flex-col gap-2 p-3 overflow-y-auto h-full">
             {/* Header label */}
             <p className="text-[10px] font-inter font-semibold uppercase tracking-widest px-1 mb-1"
@@ -2238,27 +2014,8 @@ export default function JournalEditor({
               </div>
             )}
 
-            {/* Prompting */}
-            {isListening && dictationPhase === "prompting" && (
-              <div className="rounded-xl px-4 py-3"
-                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
-                  <span className="text-[10px] font-inter font-semibold uppercase tracking-wide" style={{ color: "var(--color-ink-faint)" }}>{dictationBrowser}</span>
-                </div>
-                <p className="text-xs font-inter font-medium leading-snug" style={{ color: "var(--color-ink)" }}>
-                  Look at <strong>{micPromptLocation(dictationBrowser)}</strong> and click <strong>Allow</strong>.
-                </p>
-                <p className="text-[10px] font-inter mt-1.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                  {dictationBrowser === "Opera GX"
-                    ? "Opera GX: click the lock icon → Site Settings → Microphone → Allow."
-                    : "This permission only needs to be granted once per site."}
-                </p>
-              </div>
-            )}
-
-            {/* Active listening */}
-            {isListening && dictationPhase === "active" && (
+            {/* Recording — waveform + timer */}
+            {isRecording && (
               <div className="rounded-xl px-4 py-3 flex items-center gap-3"
                 style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid rgba(239,68,68,0.35)" }}>
                 <div className="flex items-center gap-[3px] flex-shrink-0" style={{ height: 18 }}>
@@ -2268,19 +2025,36 @@ export default function JournalEditor({
                   ))}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>{dictationBrowser}</p>
-                  <p className="text-xs font-inter font-medium truncate" style={{ color: "#ef4444" }}>{interimText || dictationStatus}</p>
+                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Recording</p>
+                  <p className="text-xs font-inter font-medium tabular-nums" style={{ color: "#ef4444" }}>
+                    {String(Math.floor(recordingSeconds / 60)).padStart(2, "0")}:{String(recordingSeconds % 60).padStart(2, "0")}
+                  </p>
                   <p className="text-[10px] font-inter mt-0.5 leading-snug" style={{ color: "var(--color-ink-faint)" }}>
-                    Say &ldquo;period&rdquo;, &ldquo;comma&rdquo;, &ldquo;new paragraph&rdquo;
+                    Click Stop when finished speaking
                   </p>
                 </div>
-                <button onClick={stopDictation} title="Stop dictation"
+                <button onClick={stopDictation} title="Stop recording"
                   className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full transition-colors"
                   style={{ backgroundColor: "rgba(239,68,68,0.12)", color: "#ef4444" }}
                   onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.22)"}
                   onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "rgba(239,68,68,0.12)"}>
                   <IconXMark />
                 </button>
+              </div>
+            )}
+
+            {/* Transcribing — spinner */}
+            {isTranscribing && (
+              <div className="rounded-xl px-4 py-3 flex items-center gap-3"
+                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-border)" }}>
+                <svg className="animate-spin flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ color: "var(--color-accent)" }}>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Transcribing</p>
+                  <p className="text-xs font-inter font-medium" style={{ color: "var(--color-ink)" }}>Converting speech to text…</p>
+                </div>
               </div>
             )}
 

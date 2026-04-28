@@ -70,7 +70,7 @@ const securityHeaders = [
     key:   "Permissions-Policy",
     value: [
       "camera=()",
-      "microphone=()",
+      "microphone=(self)",
       "geolocation=()",
       "payment=()",
       "usb=()",
