@@ -42,8 +42,12 @@ const AUTH_COOKIES = [
 ]
 
 export async function GET(request: NextRequest) {
-  const origin = new URL(request.url).origin
-  const response = NextResponse.redirect(`${origin}/`)
+  const url    = new URL(request.url)
+  const origin = url.origin
+  // Optional same-origin redirect after logout (must start with "/" to prevent open redirect)
+  const to     = url.searchParams.get("to")
+  const dest   = to?.startsWith("/") ? `${origin}${to}` : `${origin}/`
+  const response = NextResponse.redirect(dest)
 
   for (const name of AUTH_COOKIES) {
     // __Secure- and __Host- prefixed cookies require the Secure attribute

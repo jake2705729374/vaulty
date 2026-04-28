@@ -473,9 +473,9 @@ export default function SettingsPage() {
         return
       }
 
-      // Wipe local session data then sign out
+      // Wipe local session data, clear auth cookies, then land on the goodbye page
       sessionStorage.removeItem("masterPassword")
-      window.location.href = "/api/auth/logout"
+      window.location.href = "/api/auth/logout?to=/account-deleted"
     } catch {
       setDeleteError("An unexpected error occurred. Please try again.")
     } finally {

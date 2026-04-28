@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import bcrypt from "bcryptjs"
+import { sendAccountDeletionEmail } from "@/lib/email"
 
 /**
  * DELETE /api/user
@@ -12,6 +13,9 @@ import bcrypt from "bcryptjs"
  *
  * Security: the user must supply their current password, which is verified
  * against the stored bcrypt hash before any deletion occurs.
+ *
+ * After deletion a farewell email is sent to the user's address (fire-and-forget
+ * — email failure does not roll back the deletion).
  *
  * Body: { password: string }
  */
@@ -27,10 +31,17 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Password is required" }, { status: 400 })
   }
 
-  const user = await prisma.user.findUnique({
-    where:  { id: session.user.id },
-    select: { id: true, passwordHash: true },
-  })
+  // Fetch user + display name before deletion (both are gone afterwards)
+  const [user, prefs] = await Promise.all([
+    prisma.user.findUnique({
+      where:  { id: session.user.id },
+      select: { id: true, email: true, passwordHash: true },
+    }),
+    prisma.userPreferences.findUnique({
+      where:  { userId: session.user.id },
+      select: { displayName: true },
+    }),
+  ])
 
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 })
@@ -45,6 +56,9 @@ export async function DELETE(req: NextRequest) {
   // SessionSummary, Habit, HabitLog, CoachSession, CoachSessionMessage,
   // UserPreferences, Session — all have onDelete: Cascade on the User relation.
   await prisma.user.delete({ where: { id: user.id } })
+
+  // Send farewell email — fire-and-forget, email failure must not affect response
+  sendAccountDeletionEmail(user.email, prefs?.displayName ?? null).catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

@@ -176,3 +176,94 @@ export async function sendPasswordResetEmail(to: string, code: string): Promise<
     `),
   })
 }
+
+// ── Account deletion farewell email ───────────────────────────────────────────
+export async function sendAccountDeletionEmail(
+  to: string,
+  displayName: string | null,
+): Promise<void> {
+  const name    = displayName?.trim() || null
+  const greeting = name ? `Goodbye, ${name}.` : "Goodbye."
+  const appUrl  = process.env.NEXTAUTH_URL ?? "https://vaultly.app"
+
+  await send({
+    from:    FROM(),
+    to:      [to],
+    subject: "Your Vaultly account has been deleted",
+    text: [
+      greeting,
+      "",
+      "We're really sad to see you go.",
+      "",
+      "As requested, your Vaultly account has been permanently deleted. Everything is gone:",
+      "• All your journal entries",
+      "• Your coach conversations and session history",
+      "• Your habits and all logged data",
+      "• Your memories, mood logs, and preferences",
+      "",
+      "Nothing remains on our servers. Your privacy is completely intact.",
+      "",
+      "If this was a mistake, or if life brings you back to journaling someday,",
+      "you're always welcome to start fresh at " + appUrl + "/register",
+      "",
+      "We hope Vaultly helped you on your journey — even a little.",
+      "Take good care of yourself.",
+      "",
+      "With warmth,",
+      "The Vaultly Team",
+    ].join("\n"),
+    html: emailShell(`
+      <tr><td style="padding:32px 32px 0;text-align:center;">
+        <div style="display:inline-block;width:48px;height:48px;background:linear-gradient(135deg,#2563EB,#1D4ED8);border-radius:14px;margin-bottom:20px;line-height:48px;text-align:center;font-size:24px;font-weight:800;color:#fff;font-family:Georgia,serif;vertical-align:middle;">V</div>
+        <div style="font-size:28px;margin-bottom:12px;">💙</div>
+        <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">${greeting}</h1>
+        <p style="margin:0;font-size:15px;color:#6b7280;line-height:1.6;">We're really sad to see you go.</p>
+      </td></tr>
+
+      <tr><td style="padding:24px 32px 0;">
+        <p style="margin:0 0 12px;font-size:14px;color:#374151;line-height:1.7;">
+          As requested, your Vaultly account has been <strong>permanently deleted</strong>. Everything is gone:
+        </p>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${[
+            "All your journal entries",
+            "Your coach conversations and session history",
+            "Your habits and all logged data",
+            "Your memories, mood logs, and preferences",
+          ].map((item) => `
+          <tr>
+            <td style="padding:4px 0;vertical-align:top;">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2563EB;margin-right:10px;margin-top:6px;"></span>
+            </td>
+            <td style="padding:4px 0;font-size:14px;color:#374151;line-height:1.6;">${item}</td>
+          </tr>`).join("")}
+        </table>
+        <p style="margin:16px 0 0;font-size:14px;color:#374151;line-height:1.7;">
+          Nothing remains on our servers. Your privacy is completely intact.
+        </p>
+      </td></tr>
+
+      <tr><td style="padding:20px 32px;">
+        <div style="background:#f9fafb;border-radius:12px;padding:18px 20px;border-left:3px solid #2563EB;">
+          <p style="margin:0;font-size:14px;color:#374151;line-height:1.7;">
+            If this was a mistake, or if life brings you back to journaling someday,
+            you're always welcome to <a href="${appUrl}/register" style="color:#2563EB;font-weight:600;text-decoration:none;">start fresh</a>.
+          </p>
+        </div>
+      </td></tr>
+
+      <tr><td style="padding:8px 32px 32px;text-align:center;">
+        <p style="margin:0 0 4px;font-size:14px;color:#6b7280;line-height:1.7;">
+          We hope Vaultly helped you on your journey — even a little.
+        </p>
+        <p style="margin:0 0 20px;font-size:14px;color:#6b7280;">
+          Take good care of yourself. 🌿
+        </p>
+        <p style="margin:0;font-size:13px;color:#9ca3af;">
+          With warmth,<br/>
+          <strong style="color:#6b7280;">The Vaultly Team</strong>
+        </p>
+      </td></tr>
+    `),
+  })
+}
