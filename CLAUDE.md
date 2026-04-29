@@ -31,8 +31,11 @@ A personal, private journal web app inspired by Penzu. Built with Next.js and ac
 npm run dev       # Start dev server
 npm run build     # Production build (run after every backend change)
 npm test          # Run test suite
-npx prisma migrate dev    # Apply DB migrations
 npx prisma studio         # Open Prisma DB GUI
+
+# Schema changes — ALWAYS use migrate, never db push
+npx prisma migrate dev --name <description>   # Create + apply a new migration (dev only)
+npx prisma migrate deploy                     # Apply pending migrations (runs automatically in build)
 ```
 
 ---
