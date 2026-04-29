@@ -35,7 +35,7 @@ npx prisma studio         # Open Prisma DB GUI
 
 # Schema changes — ALWAYS use migrate, never db push
 npx prisma migrate dev --name <description>   # Create + apply a new migration (dev only)
-npx prisma migrate deploy                     # Apply pending migrations (runs automatically in build)
+npx prisma migrate deploy                     # Apply pending migrations to production (run manually before git push when schema changed)
 ```
 
 ---
