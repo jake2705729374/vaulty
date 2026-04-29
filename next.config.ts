@@ -1,4 +1,5 @@
 import type { NextConfig } from "next"
+import { withSentryConfig } from "@sentry/nextjs"
 
 const isProd = process.env.NODE_ENV === "production"
 
@@ -39,7 +40,8 @@ const cspDirectives = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  // 'self' for same-origin API calls; *.ingest.sentry.io for Sentry error reporting
+  "connect-src 'self' https://*.ingest.sentry.io",
   "media-src 'self' blob:",
   "frame-ancestors 'none'",    // stronger than X-Frame-Options
   "object-src 'none'",         // block Flash / plugins
@@ -115,4 +117,37 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+// ── Sentry build-time config ─────────────────────────────────────────────────
+//
+// withSentryConfig wraps the Next.js config to:
+//   1. Upload source maps to Sentry after each production build (requires
+//      SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT in env)
+//   2. Inject the Sentry client config automatically into the browser bundle
+//   3. Tree-shake Sentry logger in production builds
+//
+// Source-map upload is silently skipped when SENTRY_AUTH_TOKEN is absent,
+// so local dev and preview deploys without the token still build fine.
+//
+export default withSentryConfig(nextConfig, {
+  // Read from env so no values need to be hardcoded here.
+  // Set SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN in Vercel env vars.
+  org:     process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+
+  // Suppress Sentry CLI output in CI / Vercel build logs
+  silent: true,
+
+  // Delete source maps from the build output after uploading to Sentry —
+  // they are in Sentry for stack-trace enrichment but not served to browsers
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
+
+  // Remove Sentry debug statements from the production bundle to save bytes
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+  },
+
+  // Don't auto-create Vercel Cron Monitors (we don't use them)
+  automaticVercelMonitors: false,
+})

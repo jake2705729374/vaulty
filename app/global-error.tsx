@@ -10,6 +10,7 @@
  * Uses VAULT theme colors hardcoded since the normal CSS pipeline is bypassed.
  */
 import { useEffect } from "react"
+import * as Sentry from "@sentry/nextjs"
 
 interface GlobalErrorProps {
   error: Error & { digest?: string }
@@ -18,7 +19,11 @@ interface GlobalErrorProps {
 
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
-    console.error("[Global Error]", error)
+    // Report root-layout crashes to Sentry — these are the most severe errors
+    Sentry.captureException(error)
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[Global Error]", error)
+    }
   }, [error])
 
   return (

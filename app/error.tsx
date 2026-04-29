@@ -9,6 +9,7 @@
  */
 import { useEffect } from "react"
 import Link from "next/link"
+import * as Sentry from "@sentry/nextjs"
 
 interface ErrorProps {
   error: Error & { digest?: string }
@@ -17,8 +18,11 @@ interface ErrorProps {
 
 export default function AppError({ error, reset }: ErrorProps) {
   useEffect(() => {
-    // Log to console in dev; replace with Sentry/LogRocket in production if desired
-    console.error("[App Error]", error)
+    // Report to Sentry in production; also log locally for dev convenience
+    Sentry.captureException(error)
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[App Error]", error)
+    }
   }, [error])
 
   return (
