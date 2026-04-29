@@ -156,7 +156,7 @@ export default function SplashScreen({ name, visible, onDone }: SplashScreenProp
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.55, ease: "easeOut", delay: 0.15 }}
               className="text-sm font-inter font-medium uppercase tracking-[0.3em] mb-5"
-              style={{ color: "rgba(147,197,253,0.6)" }}
+              style={{ color: "rgba(186,220,255,0.92)" }}
             >
               Welcome{name ? "," : ""}
             </motion.p>
@@ -236,7 +236,7 @@ export default function SplashScreen({ name, visible, onDone }: SplashScreenProp
               animate={{ opacity: 1 }}
               transition={{ duration: 0.6, ease: "easeOut", delay: subDelay }}
               className="mt-8 text-[11px] font-inter tracking-[0.28em] uppercase"
-              style={{ color: "rgba(147,197,253,0.32)" }}
+              style={{ color: "rgba(186,220,255,0.72)" }}
             >
               Your journal is ready
             </motion.p>
