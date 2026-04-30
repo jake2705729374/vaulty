@@ -46,6 +46,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Vitest — runs lib/crypto.ts and lib/password-strength.ts tests.
+      # Uses globalThis.crypto.subtle (Node 18+) — no browser / jsdom needed.
+      # Crypto tests include full round-trips, wrong-key rejection, tamper
+      # detection, password-change (rewrapMek), and the legacy → MEK migration.
+      - name: Test
+        run: npm test
+
       # next build runs TypeScript type-checking AND compiles the full app.
       # No real database connection happens at build time — dynamic routes are
       # compiled, not executed.  We pass minimal placeholder env vars so that

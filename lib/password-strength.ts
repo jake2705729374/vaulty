@@ -78,7 +78,9 @@ export function getPasswordStrength(pw: string): PasswordStrength {
     color,
     requirements,
     isCommon,
-    isAcceptable: score >= 3 && !isCommon,
+    // Length is mandatory — score >= 3 out of the remaining three requirements
+    // isn't sufficient if the password is too short.
+    isAcceptable: pw.length >= 10 && score >= 3 && !isCommon,
   }
 }
 
