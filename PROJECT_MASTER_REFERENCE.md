@@ -25,6 +25,9 @@
    - [8.9 Grammar Check](#89-grammar-check)
    - [8.10 Daily Prompts & Quotes](#810-daily-prompts--quotes)
    - [8.11 Mood Tracking](#811-mood-tracking)
+   - [8.12 Media Attachments](#812-media-attachments)
+   - [8.13 Voice Transcription](#813-voice-transcription)
+   - [8.14 PWA / Mobile App](#814-pwa--mobile-app)
 9. [AI Integration](#9-ai-integration)
 10. [All API Routes](#10-all-api-routes)
 11. [Component Inventory](#11-component-inventory)
@@ -32,7 +35,7 @@
 13. [File & Directory Structure](#13-file--directory-structure)
 14. [Environment Variables](#14-environment-variables)
 15. [Known Architectural Decisions & Constraints](#15-known-architectural-decisions--constraints)
-16. [Deployment](#16-deployment)
+16. [Deployment & CI/CD](#16-deployment--cicd)
 
 ---
 
@@ -68,22 +71,28 @@ Vaultly is a single-user, personal app. There is no social component, no sharing
 
 | Layer | Technology | Version / Notes |
 |---|---|---|
-| Framework | Next.js (App Router) | 16.2.3 with Turbopack |
+| Framework | Next.js (App Router) | 16.x with Turbopack in dev |
 | Language | TypeScript | Strict mode |
-| Auth | NextAuth.js | 5.0.0-beta.30 (Credentials provider) |
-| Database | PostgreSQL | Hosted on Supabase or self-hosted |
-| ORM | Prisma | 7.7.0 |
+| Auth | NextAuth.js | v5 beta (Credentials provider) |
+| Database | PostgreSQL | Hosted on Supabase |
+| ORM | Prisma | v7 |
 | Encryption | Web Crypto API | AES-256-GCM + PBKDF2, client-side only |
 | AI | Claude API (Anthropic) | claude-haiku-4-5-20251001 |
-| Rich Text Editor | Tiptap | 3.22.3 + StarterKit |
-| Animations | Framer Motion | 12.38.0 |
+| Object Storage | Supabase Storage | Photos/videos in `entry-media` bucket |
+| Rich Text Editor | Tiptap | v3 + StarterKit |
+| Animations | Framer Motion | v12 |
 | Styling | Tailwind CSS | v4 |
-| UI Components | shadcn/ui pattern | Custom implementations |
-| Icons | Lucide React | 1.8.0 |
-| Toasts | Sonner | 2.0.7 |
-| Email | Resend | 6.12.0 |
+| Icons | Lucide React | latest |
+| Toasts | Sonner | v2 |
+| Email | Resend | v6 |
 | Rate Limiting | Upstash Redis + @upstash/ratelimit | IP-based |
-| Hosting | Vercel | Auto-deploy from GitHub |
+| Validation | Zod | v4 — `lib/validation.ts` |
+| Error Monitoring | Sentry | @sentry/nextjs v10 |
+| Analytics | Vercel Analytics + Speed Insights | Custom typed events via `lib/analytics.ts` |
+| Voice Transcription | OpenAI Whisper | `app/api/transcribe/` |
+| Testing | Vitest | Unit tests in `__tests__/lib/` |
+| CI/CD | GitHub Actions | `.github/workflows/ci.yml` |
+| Hosting | Vercel | Auto-deploy from GitHub; Cron Jobs for digest |
 | Backups | Raspberry Pi | Shell scripts + cron |
 | State (Auth) | NextAuth session | JWT strategy |
 | Dark Mode | next-themes | System / Light / Dark |
@@ -104,9 +113,10 @@ Browser (Client)
   └── fetch() calls to:
         │
         ├── /api/* (Node Runtime on Vercel)
-        │     ├── Prisma → PostgreSQL
+        │     ├── Prisma → PostgreSQL (Supabase)
         │     ├── Anthropic SDK → Claude API
-        │     └── Resend → email
+        │     ├── Resend → email
+        │     └── Supabase Storage REST API → object storage
         │
         └── /api/auth/* (NextAuth)
               └── Credentials provider (bcrypt)
@@ -116,12 +126,20 @@ Edge Runtime (proxy.ts)
   - Validates JWT, redirects unauthenticated users to /login
   - Adds security headers (CSP, HSTS, X-Frame-Options, etc.)
   - NO Prisma, NO Credentials provider (Edge-incompatible)
+
+Observability
+  - Sentry captures exceptions (client + server + edge)
+  - Vercel Analytics tracks custom events (lib/analytics.ts)
+  - Vercel Speed Insights captures Web Vitals
+
+Cron Jobs (Vercel)
+  - Daily 09:00 UTC → GET /api/digest/weekly (processes all opted-in users)
 ```
 
 **Critical separation:**
 - `proxy.ts` + `auth.config.ts` → Edge Runtime (no Node APIs, no Prisma)
 - `lib/auth.ts` → Node Runtime (Credentials provider, bcrypt, Prisma)
-- All encryption → Client-side only (Web Crypto API)
+- All entry encryption/decryption → Client-side only (Web Crypto API)
 
 ---
 
@@ -132,7 +150,7 @@ Edge Runtime (proxy.ts)
 ```
 User Password
     │
-    ▼ PBKDF2 (100,000 iterations, 16-byte random salt)
+    ▼ PBKDF2 (100,000 iterations, 16-byte random salt, SHA-256)
 Key Encryption Key (KEK)  ──────────────────────────────► stored: kekSalt
     │
     ▼ AES-256-GCM wrap
@@ -211,7 +229,7 @@ Every response through `proxy.ts` gets:
 
 ### Sign-Up Flow
 1. `POST /api/auth/register` — hash password with bcrypt, create User, send verification email via Resend
-2. User clicks link in email → `POST /api/auth/verify-email` — sets `emailVerified = true`
+2. User receives 6-digit OTP email → `POST /api/auth/verify-email` — sets `emailVerified = true`
 3. User can now log in
 
 ### Sign-In Flow
@@ -225,7 +243,7 @@ Every response through `proxy.ts` gets:
 3. Session callback: `session.user.id = token.id`
 
 ### Password Reset Flow
-1. `POST /api/auth/forgot-password` — generate 6-digit OTP, set `resetToken` + `resetTokenExpiry` (15 min), send OTP email
+1. `POST /api/auth/forgot-password` — generate 6-digit OTP, SHA-256 hash stored in DB, send OTP email (15-min TTL)
 2. `POST /api/auth/reset-password` — verify OTP, bcrypt new password, re-wrap MEK with new KEK, update DB
 
 ### Sign-Out
@@ -243,47 +261,52 @@ Unauthenticated requests are redirected to `/login` by NextAuth's `authorized` c
 
 ## 7. Database Schema
 
-All models are in `prisma/schema.prisma`. The database is PostgreSQL.
+All models are in `prisma/schema.prisma`. The database is PostgreSQL hosted on Supabase.
 
 ### User
 ```
 id              String      Primary key (cuid)
 email           String      Unique
 passwordHash    String      bcrypt hash
-displayName     String?     From onboarding
 encryptedMek    String?     Base64 AES-256-GCM wrapped MEK
 mekIv           String?     Base64 IV for MEK unwrap
 kekSalt         String?     Base64 salt for KEK derivation
-emailVerified   Boolean     Default false; required to log in
-resetToken      String?     6-digit OTP for password reset
-resetTokenExpiry DateTime?  15-minute expiry
+emailVerified   Boolean     Default true (pre-existing accounts); new users start false
+verifyToken     String?     Email verification token
+verifyTokenExp  DateTime?   Expiry for verification token
+resetToken      String?     SHA-256 hash of 6-digit OTP for password reset
+resetTokenExp   DateTime?   15-minute expiry
 createdAt       DateTime
+updatedAt       DateTime
 ```
 
 ### Entry
 ```
-id          String    Primary key
+id          String    Primary key (cuid)
 userId      String    FK → User
-title       String    Plaintext (shown in list view — not sensitive)
+title       String    Plaintext (shown in list view — non-sensitive)
 ciphertext  String    AES-256-GCM encrypted body
 iv          String    Base64 IV
 salt        String?   Base64 salt — null for MEK entries, present for legacy entries
 createdAt   DateTime
 updatedAt   DateTime
 ```
-Relations: EntryMedia[], MoodLog?, ChatMessage[]
+Relations: `EntryMedia[]`, `MoodLog?`, `ChatMessage[]`
 
 ### EntryMedia
 ```
-id        String
-entryId   String    FK → Entry
-userId    String    FK → User
-data      Bytes     Binary file data
-mimeType  String    e.g. "image/jpeg"
-fileName  String
-fileSize  Int       bytes
-caption   String?
+id         String    Primary key (cuid)
+entryId    String    FK → Entry
+userId     String    FK → User
+storageUrl String?   Public Supabase Storage CDN URL (null for legacy rows)
+mimeType   String    e.g. "image/jpeg"
+fileName   String
+fileSize   Int       bytes
+caption    String?   Optional user-written caption
+createdAt  DateTime
 ```
+**Note:** The old `data Bytes` column was dropped in migration `20260429000000_media_object_storage`.
+Binary data now lives in Supabase Storage, not Postgres. Never read `EntryMedia.data` — that column no longer exists.
 
 ### MoodLog (1:1 with Entry)
 ```
@@ -298,31 +321,50 @@ loggedAt  DateTime
 ### UserPreferences (1:1 with User)
 ```
 id                  String
-userId              String    Unique FK → User
+userId              String     Unique FK → User
 displayName         String?
 colorTheme          ColorTheme Enum: PARCHMENT | SLATE | ROSE | FOREST | MIDNIGHT | VAULT | CUSTOM
 darkMode            DarkMode   Enum: SYSTEM | LIGHT | DARK
-customThemeAccent   String?   Hex color
-customThemePage     String?   Hex color
-journalingGoals     String?   JSON array of goal strings
+customTheme         String?    JSON: {"accent":"#hex","page":"#hex"}
+journalingGoals     String?    JSON array of goal strings
 journalingFrequency String?
-quoteCategories     String?   JSON array
-coachContextEnabled Boolean   Default false — privacy toggle for AI seeing entries
-coachPeople         String?   JSON: [{name, relationship, birthday?, closeness?, traits?, notes?}]
-coachLifeContext    String?   JSON: {phase: string, situations: string[]}
-userBio             String?   Free-text about the user for coach context
-coachStyle          String?   "gentle" | "direct" | "challenging" | "balanced"
-digestEnabled       Boolean   Default false
-digestDay           String?   "Monday"–"Sunday"
+quoteCategories     String?    JSON array
+coachContextEnabled Boolean    Default false — privacy toggle for AI seeing entries
+coachPeople         String?    JSON: [{name, relationship, birthday?, closeness?, traits?, notes?}]
+coachLifeContext    String?    JSON: {phase: string, situations: string[]}
+userBio             String?    Free-text about the user for coach context
+coachStyle          String?    "gentle" | "direct" | "challenging" | "balanced"
+digestEnabled       Boolean    Default false
+digestDay           String     Default "sunday"
 lastDigestAt        DateTime?
-onboardingDone      Boolean   Default false
+onboardingDone      Boolean    Default false
+updatedAt           DateTime
 ```
 
-### ChatMessage
+### ChatMessage (per-entry conversation history)
 ```
 id        String
 userId    String
-entryId   String?   Null for standalone coach conversations
+entryId   String    FK → Entry (required — per-entry conversations only)
+role      String    "user" | "assistant"
+content   String
+createdAt DateTime
+```
+
+### CoachSession (standalone /coach page sessions)
+```
+id        String    Primary key (cuid)
+userId    String    FK → User
+title     String    Default "New conversation"; auto-generated after 4 messages
+createdAt DateTime
+updatedAt DateTime
+```
+Relations: `CoachSessionMessage[]`
+
+### CoachSessionMessage
+```
+id        String
+sessionId String    FK → CoachSession
 role      String    "user" | "assistant"
 content   String
 createdAt DateTime
@@ -333,7 +375,7 @@ createdAt DateTime
 id        String
 userId    String
 content   String    Durable fact extracted by coach (e.g. "User has a sister named Sarah")
-source    String    "coach" | "manual"
+source    String?   "coach" | "manual"
 createdAt DateTime
 ```
 
@@ -341,7 +383,7 @@ createdAt DateTime
 ```
 id        String
 userId    String
-entryId   String?
+entryId   String?   Optional link to the entry the session was about
 summary   String    1–2 sentence summary of a coaching session
 createdAt DateTime
 ```
@@ -352,20 +394,22 @@ id          String
 userId      String
 name        String
 description String?
-color       String?   Hex or CSS color name
-order       Int       For drag-reorder
+color       String    Default "#6366f1"
+order       Int       For drag-reorder; default 0
 createdAt   DateTime
+updatedAt   DateTime
 ```
-Relations: HabitLog[]
+Relations: `HabitLog[]`
 
 ### HabitLog
 ```
 id       String
 habitId  String    FK → Habit
 userId   String
-date     String    ISO date "YYYY-MM-DD" (client local date)
+date     String    ISO date "YYYY-MM-DD" (client local date — never UTC)
+createdAt DateTime
 ```
-Unique constraint: (habitId, date) — one log per habit per day
+Unique constraint: `(habitId, date)` — one log per habit per day
 
 ### Session (NextAuth)
 ```
@@ -439,12 +483,14 @@ The editor is a Tiptap-powered rich text editor with multiple features layered o
 | **Auto-save** | Runs every 2 seconds; calls `onAutoSave(title, content, mood)` callback — parent encrypts and PATCHes API |
 | **Manual save** | Cmd+S or save button. Shows "Auto-saved" confirmation message. |
 | **Draft recovery** | Saves to sessionStorage every keystroke; recovered on page reload. Key passed as `draftKey` prop. |
-| **Media attachments** | Add photos/videos. Preview inline. Optional caption. Stored as binary blobs in DB (EntryMedia). |
+| **Media attachments** | Add photos/videos. Preview inline with lightbox. Optional caption. Stored in Supabase Storage. |
 | **Speech-to-text** | Mic button → Web Speech API continuous recognition. Interim results shown in italics. Appended to editor on pause. |
+| **Voice dictation (server)** | OpenAI Whisper transcription via `POST /api/transcribe` — for higher-quality transcription |
 | **Keyboard shortcuts** | Cmd+B bold, Cmd+I italic, Cmd+S save, formatting toolbar for all other shortcuts |
 | **Delete** | Trash icon → confirmation modal → DELETE API |
 | **Cancel / auto-delete** | If entry is completely empty (no title, no content), canceling silently deletes it |
 | **Active prompt** | If the user clicked a daily prompt on the dashboard, it appears above the editor in a callout box |
+| **Grammar check** | Grammar button in toolbar → `POST /api/grammar` → suggestions appear in right panel |
 
 #### Right Panel (desktop)
 The right side of the editor screen is empty by default and reveals panels on demand:
@@ -484,6 +530,11 @@ interface JournalEditorProps {
   draftKey:            string
 }
 ```
+
+#### Analytics Events Fired
+- `entry_saved` — on every save, includes `{ type: "auto" | "manual", word_count: number }`
+- `media_uploaded` — after successful upload, includes `{ media_type: "image" | "video" }`
+- `coach_panel_opened` — when mobile "Coach" tab is tapped, includes `{ device: "mobile" }`
 
 ---
 
@@ -558,14 +609,16 @@ If `coachContext` is null (user hasn't set up their coach profile), a banner app
 ### 8.5 Standalone Coach Page
 
 **File:** `app/(pages)/coach/page.tsx`
+**Legacy redirect:** `app/(pages)/therapist/page.tsx` redirects to `/coach`
 
 A full-page version of the coach chat — not attached to any journal entry. Good for quick conversations not tied to a specific writing session.
 
+- **Sessions sidebar** — persistent list of past conversations, grouped by date (Today, Yesterday, This Week, etc.)
+- **Auto-naming** — after the 4th message (2nd full exchange), `POST /api/coach/sessions/[id]/generate-title` fires fire-and-forget; Claude Haiku generates a 4–7 word specific title; sidebar updates optimistically
 - Loads coach context from `/api/user/preferences`
-- Loads chat history from DB
 - Same streaming architecture as the in-editor panel
 - No "Add to Entry" button (no editor context)
-- No recent entries (no active entry to attach to)
+- Privacy toggle: no recent entries sent (standalone sessions are not attached to an entry)
 
 ---
 
@@ -626,7 +679,7 @@ All sections auto-save using a debounced PATCH to `/api/user/preferences` (no ma
 | **Profile** | Display name, user bio (both free-text) |
 | **Appearance** | Color theme (6 presets + custom), dark mode (System/Light/Dark), custom accent + page colors |
 | **Journaling** | Goals (multi-select checkboxes), frequency (radio), quote categories (multi-select) |
-| **Coach Profile** | People list (same UI as onboarding step 7), life phase, current situations |
+| **Coach Profile** | People list (same UI as onboarding step 7 — add/remove people with name, relationship, birthday, closeness, traits), life phase, current situations. `id="coach-profile"` for deep-link from CoachPanel nudge. |
 | **Coach Personalization** | Coaching style radio (Gentle/Balanced/Direct/Challenging), user bio |
 | **Privacy** | "AI sees my journal entries" toggle — turning ON shows a privacy disclosure modal explaining that entries are decrypted in-browser and sent to Anthropic (never stored in plaintext on server). Turning OFF immediately saves `coachContextEnabled: false`. |
 | **Weekly Digest** | Enable toggle, day picker (Mon–Sun), last sent date display |
@@ -643,6 +696,12 @@ onClick={() => {
 ```
 This clears the in-memory master password and redirects to the Node-runtime logout route (bypasses Edge middleware entirely).
 
+#### Analytics Events Fired
+- `settings_goal_toggled` — when a journaling goal checkbox changes
+- `settings_theme_changed` — when color theme changes, includes `{ theme: string }`
+- `settings_ai_entries_toggled` — when the "AI sees my journal entries" toggle changes, includes `{ enabled: boolean }`
+- `settings_coach_style_changed` — when coaching style changes, includes `{ style: string }`
+
 ---
 
 ### 8.8 Weekly Digest
@@ -651,18 +710,20 @@ This clears the in-memory master password and redirects to the Node-runtime logo
 
 An opt-in feature that emails the user a warm weekly summary of their journaling activity.
 
-**Trigger:** `GET /api/digest/weekly` — can be called by a cron job or on-demand.
+**Two callers:**
+1. **Vercel Cron** (daily 09:00 UTC, configured in `vercel.json`) — processes all opted-in users. Authenticated via `Authorization: Bearer <CRON_SECRET>` header.
+2. **Client dashboard load** — processes only the current user via NextAuth session. No-ops if last digest was < 6 days ago.
 
 **Logic:**
-1. Check `digestEnabled = true` and `digestDay` matches today's day name
-2. Check `lastDigestAt` is more than 6 days ago (prevents double-sends)
-3. Fetch entries from the last 7 days (ciphertext — server-side only, sent to Claude)
-4. Fetch mood logs + memories for context
-5. Generate digest via Claude (DIGEST_SYSTEM_PROMPT, cached)
+1. Check `digestEnabled = true` and `lastDigestAt` is more than 6 days ago (prevents double-sends)
+2. Fetch entry titles + moods from the last 7 days (titles are plaintext — body ciphertext is NOT used)
+3. Fetch saved memories + session summaries from the past week
+4. Build plain-text digest input for Claude (entry date + title + mood, memories, session notes)
+5. Generate digest via Claude (DIGEST_SYSTEM_PROMPT, max 600 tokens)
 6. Send email via Resend to the user's registered email
 7. Update `lastDigestAt` in DB
 
-**Note on privacy:** The digest feature sends ciphertext to Claude on the server side — this is different from the coach's "see entries" feature where the client decrypts before sending. The digest uses the server-stored ciphertext. This is an architectural inconsistency to be aware of: the digest breaks the "server never sees plaintext" promise if Claude can read the ciphertext. In practice, the digest prompt gets the raw ciphertext which Claude would need to decrypt — this may be a bug or future work area.
+**Privacy note:** The digest uses only entry **titles** and **moods** — not the encrypted body. The server never sends ciphertext to Claude. This is consistent with the "server never sees plaintext" architecture because titles are stored as plaintext (intentional design choice).
 
 ---
 
@@ -722,6 +783,77 @@ Fetches mood history + entry titles, sends to Claude (INSIGHTS_SYSTEM_PROMPT), r
 
 ---
 
+### 8.12 Media Attachments
+
+**Storage:** Supabase Storage (`entry-media` bucket, public)
+**API:** `app/api/entries/[id]/media/`
+**Library:** `lib/storage.ts`
+
+Photos and videos attached to journal entries are stored in Supabase Storage object storage — not in Postgres. Only the CDN URL is kept in the database.
+
+#### Upload Flow
+1. User selects file in JournalEditor
+2. Client reads file as `ArrayBuffer` via `file.arrayBuffer()`
+3. `POST /api/entries/[id]/media` — multipart form data
+4. Server creates DB record to get stable `mediaId` (cuid)
+5. Server calls `uploadMedia(arrayBuffer, mimeType, fileName, userId, mediaId)` in `lib/storage.ts`
+6. `lib/storage.ts` calls Supabase Storage REST API: `POST /storage/v1/object/entry-media/{userId}/{mediaId}-{safeName}`
+7. Returns public CDN URL
+8. Server updates `EntryMedia.storageUrl` with CDN URL
+9. Client displays thumbnail using `blobUrl` (instant preview) then `storageUrl` on reload
+
+#### Delete Flow
+1. `DELETE /api/entries/[id]/media/[mediaId]`
+2. Server calls `deleteMedia(storageUrl)` — Supabase Storage REST API `DELETE` with `{ prefixes: [path] }`
+3. Server deletes `EntryMedia` DB record
+4. Storage errors are non-fatal (stale URLs acceptable; 404s silently succeed)
+
+#### Storage Path Format
+```
+entry-media/{userId}/{mediaId}-{sanitizedFileName}
+```
+Non-guessable paths (cuid IDs) provide security through obscurity. Public bucket — no signed URLs needed.
+
+#### `lib/storage.ts` Functions
+```typescript
+uploadMedia(fileBuffer: ArrayBuffer, mimeType: string, fileName: string, userId: string, mediaId: string): Promise<string>
+deleteMedia(storageUrl: string): Promise<void>
+```
+
+**Required env vars:** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+
+---
+
+### 8.13 Voice Transcription
+
+**File:** `app/api/transcribe/route.ts`
+
+Server-side audio transcription via OpenAI Whisper. Used when the browser Web Speech API is insufficient (background noise, accents, etc.).
+
+- Accepts audio blob upload
+- Calls OpenAI Whisper API
+- Returns transcript text
+- Client appends transcript to the Tiptap editor
+
+**Required env var:** `OPENAI_API_KEY`
+
+---
+
+### 8.14 PWA / Mobile App
+
+Vaultly is installable as a Progressive Web App (Add to Home Screen on iOS).
+
+| File | Purpose |
+|---|---|
+| `app/manifest.ts` | Web App Manifest: `display: standalone`, `start_url: /dashboard`, `theme_color: #7c6ef2`, `orientation: portrait` |
+| `app/icon.tsx` | PWA app icon — 512×512 via Next.js `ImageResponse`: purple "V" on dark gradient |
+| `app/apple-icon.tsx` | iOS home screen icon — 180×180 via `ImageResponse` (no border-radius; iOS applies its own squircle) |
+| `app/layout.tsx` | `appleWebApp: { capable: true, statusBarStyle: "black-translucent" }`, `themeColor: "#7c6ef2"` |
+
+On iOS: Add to Home Screen → launches in standalone mode (no browser chrome), starts at `/dashboard`, uses the apple-icon.
+
+---
+
 ## 9. AI Integration
 
 ### Model
@@ -750,7 +882,7 @@ const systemBlocks = [
   {
     type: "text",
     text: contextBlock,
-    // No cache_control — changes per user
+    // No cache_control — changes per user, must not be cached
   },
 ]
 ```
@@ -803,12 +935,12 @@ while (true) {
 | Method | Route | Description |
 |---|---|---|
 | POST | `/api/auth/register` | Create account, send verification email |
-| POST | `/api/auth/verify-email` | Verify email token → set emailVerified |
+| POST | `/api/auth/verify-email` | Verify OTP → set emailVerified |
 | POST | `/api/auth/resend-verification` | Re-send verification email |
 | POST | `/api/auth/forgot-password` | Generate OTP, send reset email |
 | POST | `/api/auth/reset-password` | Verify OTP, set new password + re-wrap MEK |
 | GET | `/api/auth/logout` | Clear all session cookies, redirect to `/` |
-| GET | `/api/auth/check-verification` | Check if email is verified (for auth flow) |
+| GET | `/api/auth/check-verification` | Check if email is verified |
 | ANY | `/api/auth/[...nextauth]` | NextAuth internal handlers (CSRF, callbacks) |
 
 ### Journal Entries
@@ -816,24 +948,25 @@ while (true) {
 |---|---|---|
 | GET | `/api/entries` | List all entries (metadata: id, title, createdAt, mood) |
 | POST | `/api/entries` | Create new entry (ciphertext + iv + salt + mood) |
-| GET | `/api/entries/[id]` | Get single entry with ciphertext |
-| PUT | `/api/entries/[id]` | Update entry (re-encrypt content) |
-| DELETE | `/api/entries/[id]` | Delete entry + associated media |
+| GET | `/api/entries/[id]` | Get single entry with ciphertext + media |
+| PUT | `/api/entries/[id]` | Update entry (re-encrypted content) |
+| DELETE | `/api/entries/[id]` | Delete entry + associated media (DB + Storage) |
 | GET | `/api/entries/export` | All entries for client-side bulk export |
-| GET | `/api/entries/recent` | Last N entries (for coach context). `?limit=10` |
+| GET | `/api/entries/recent` | Last N entries (ciphertext only, for coach context). `?limit=10` |
 | POST | `/api/entries/bulk-delete` | Delete multiple entries by ID array |
-| GET | `/api/entries/[id]/chat` | Get conversation history for this entry |
-| POST | `/api/entries/[id]/chat` | Append messages to conversation history |
+| GET | `/api/entries/[id]/chat` | Get per-entry conversation history |
+| POST | `/api/entries/[id]/chat` | Append messages to per-entry conversation |
 | GET | `/api/entries/[id]/media` | Get all media for an entry |
-| POST | `/api/entries/[id]/media` | Upload media attachment |
-| DELETE | `/api/entries/[id]/media/[mediaId]` | Delete specific attachment |
+| POST | `/api/entries/[id]/media` | Upload media attachment (multipart) |
+| PATCH | `/api/entries/[id]/media/[mediaId]` | Update media caption |
+| DELETE | `/api/entries/[id]/media/[mediaId]` | Delete attachment (Storage + DB) |
 
 ### User & Preferences
 | Method | Route | Description |
 |---|---|---|
-| GET | `/api/user/preferences` | Get all preferences (or defaults) |
+| GET | `/api/user/preferences` | Get all preferences (or defaults if not set) |
 | PATCH | `/api/user/preferences` | Update any subset of preference fields |
-| GET | `/api/user/key-bundle` | Get encrypted MEK bundle for decryption |
+| GET | `/api/user/key-bundle` | Get encrypted MEK bundle for client-side decryption |
 | POST | `/api/user/migrate-keys` | One-time: store key bundle + re-encrypt all entries |
 | POST | `/api/user/password` | Change password + re-wrap MEK |
 
@@ -844,8 +977,16 @@ while (true) {
 | POST | `/api/coach/extract` | Extract durable facts from conversation → save as Memory |
 | POST | `/api/coach/retrieve` | Semantic search over memories/entries for relevant context |
 | POST | `/api/coach/safety` | Pre-check message for elevated distress signals |
+| GET | `/api/coach/sessions` | List all coach sessions (title, createdAt, last message preview) |
+| POST | `/api/coach/sessions` | Create new coach session |
+| GET | `/api/coach/sessions/[id]` | Get session + messages |
+| PATCH | `/api/coach/sessions/[id]` | Update session title |
+| DELETE | `/api/coach/sessions/[id]` | Delete session + messages |
+| GET | `/api/coach/sessions/[id]/messages` | Get messages for a session |
+| POST | `/api/coach/sessions/[id]/messages` | Append message to session |
+| POST | `/api/coach/sessions/[id]/generate-title` | Auto-generate title from first 6 messages (Claude Haiku, fire-and-forget) |
 
-### AI Therapist (legacy label, same AI capabilities)
+### AI Therapist (legacy routes, kept for compatibility)
 | Method | Route | Description |
 |---|---|---|
 | POST | `/api/therapist/chat` | Streaming therapist response (no coach context) |
@@ -868,7 +1009,6 @@ while (true) {
 |---|---|---|
 | GET | `/api/memories` | List all user memories |
 | POST | `/api/memories` | Save a new memory |
-| GET | `/api/memories/[id]` | Get single memory |
 | DELETE | `/api/memories/[id]` | Delete memory |
 | POST | `/api/session-summary` | Summarize a coaching session |
 
@@ -882,7 +1022,8 @@ while (true) {
 |---|---|---|
 | GET | `/api/prompts/daily` | Generate/fetch daily journaling prompt. `?skip=N` |
 | POST | `/api/grammar` | Grammar/style check for entry text |
-| GET | `/api/digest/weekly` | Check + send weekly digest email |
+| POST | `/api/transcribe` | OpenAI Whisper audio transcription |
+| GET | `/api/digest/weekly` | Check + send weekly digest email (also triggered by Vercel Cron) |
 
 ---
 
@@ -931,13 +1072,13 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 ```
 1. User visits /register
 2. Enters email + password → POST /api/auth/register
-   - Bcrypt password hash, create User record, send verification email
-3. Clicks verification link in email → POST /api/auth/verify-email
+   - Bcrypt password hash, create User record, send verification email (Resend)
+3. Clicks 6-digit OTP → POST /api/auth/verify-email
    - emailVerified = true
 4. Logs in → POST /api/auth/[...nextauth] (Credentials)
-   - Rate limit check, bcrypt compare, emailVerified check
+   - Rate limit check (Upstash), bcrypt compare, emailVerified check
    - JWT created, session stored
-5. proxy.ts validates JWT on every /dashboard/* request
+5. proxy.ts validates JWT on every protected route request
 6. Redirected to /onboarding (onboardingDone = false)
 7. Completes 8-step onboarding → PATCH /api/user/preferences + POST /api/habits
 8. Redirected to /dashboard
@@ -950,6 +1091,7 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 14. User writes → encryptWithMek() client-side → POST /api/entries
 15. Auto-save every 2s → PUT /api/entries/[id]
 16. Coach panel opened → POST /api/coach/chat (streaming)
+17. Sentry + Vercel Analytics active throughout for error/event tracking
 ```
 
 ### Returning User Opening an Entry
@@ -960,10 +1102,11 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 3. unlockMek(password, bundle) → MEK in memory
 4. GET /api/entries → list renders (titles only, no decryption needed)
 5. User clicks entry → /journal/[id]
-6. GET /api/entries/[id] → { ciphertext, iv, salt }
+6. GET /api/entries/[id] → { ciphertext, iv, salt, media: [{storageUrl, ...}] }
 7. salt === null → decryptWithMek(ciphertext, iv, mek)
    salt !== null → decryptEntry(ciphertext, iv, salt, password)  [legacy]
 8. Editor populated with decrypted content
+9. Media thumbnails load from storageUrl (Supabase Storage CDN)
 ```
 
 ### Password Change
@@ -983,10 +1126,10 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 ### Coach Conversation (In-Editor)
 
 ```
-1. User opens JournalEditor, writes content
+1. User opens JournalEditor, writes content (live text fed via onEditorTextChange debounced 500ms)
 2. Clicks Coach button → CoachPanel opens
 3. If entryId exists: GET /api/entries/[id]/chat → load history
-4. Starter prompts shown (built from coachContext)
+4. Starter prompts shown (built from coachContext.people + situations)
 5. User clicks prompt or types message
 6. POST /api/coach/safety → check for elevated distress
 7. POST /api/coach/chat → {message, history, coachContext, entryContent, recentEntries?, elevated}
@@ -1000,6 +1143,40 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 10. Fire-and-forget: POST /api/coach/extract (extract facts → Memory)
 11. POST /api/entries/[id]/chat (persist messages to DB)
 12. POST /api/session-summary (summarize session → SessionSummary)
+13. track("coach_message_sent") analytics event fired
+```
+
+### Coach Session Auto-Title (Standalone Coach)
+
+```
+1. User sends 4th message in a coach session (2nd full exchange)
+2. Client detects newMessages.length + 1 === 4
+3. Fire-and-forget: POST /api/coach/sessions/[id]/generate-title
+   Server side:
+   - Load first 6 messages
+   - Build compact transcript (role: content.slice(0, 200))
+   - claude-haiku: "4–7 words, specific, sentence case, no quotes, reply with title only"
+   - Strip quotes, limit to 100 chars
+   - Update CoachSession.title
+4. Client optimistically updates sidebar: setSessions(prev => prev.map(...))
+```
+
+### Media Upload
+
+```
+1. User clicks attach (or drag-drop) in JournalEditor
+2. file.arrayBuffer() → ArrayBuffer
+3. POST /api/entries/[id]/media (multipart form data)
+   Server:
+   - Create EntryMedia DB record (gets stable mediaId)
+   - uploadMedia(arrayBuffer, mimeType, fileName, userId, mediaId)
+     → Supabase Storage REST API: POST /storage/v1/object/entry-media/{userId}/{mediaId}-{name}
+     → Returns public CDN URL
+   - Update EntryMedia.storageUrl
+   - If storage fails: delete the DB record, return 500
+4. Client receives { storageUrl, ... }
+5. Displays thumbnail via blobUrl (instant) then storageUrl on next load
+6. track("media_uploaded", { media_type }) analytics event
 ```
 
 ---
@@ -1007,151 +1184,200 @@ Built following shadcn/ui patterns with Tailwind + CVA:
 ## 13. File & Directory Structure
 
 ```
-/Users/barrettbeyers/Downloads/Journal Tech App/
-│
+/
 ├── app/
 │   ├── (pages)/
-│   │   ├── coach/page.tsx              Standalone coach chat page
-│   │   ├── dashboard/page.tsx          Main hub (stats, prompts, quick actions)
-│   │   ├── habits/page.tsx             Habit tracker (30-day grids, rings)
-│   │   ├── journal/
-│   │   │   ├── page.tsx                Entry list + new entry
-│   │   │   └── [id]/page.tsx           Existing entry editor
-│   │   ├── login/page.tsx              Sign-in form
-│   │   ├── onboarding/page.tsx         8-step onboarding flow
-│   │   ├── register/page.tsx           Registration form
-│   │   ├── settings/page.tsx           All settings (profile, theme, coach, digest, password)
-│   │   └── therapist/page.tsx          Legacy therapist page (redirects to /coach)
+│   │   ├── (protected)/              # All require auth (proxy.ts middleware)
+│   │   │   ├── coach/
+│   │   │   │   └── page.tsx          Standalone coach chat with sessions sidebar
+│   │   │   ├── dashboard/
+│   │   │   │   └── page.tsx          Main hub
+│   │   │   ├── habits/
+│   │   │   │   └── page.tsx          Habit tracker (30-day grids, rings)
+│   │   │   ├── journal/
+│   │   │   │   ├── page.tsx          Entry list + new entry
+│   │   │   │   └── [id]/
+│   │   │   │       └── page.tsx      Existing entry editor
+│   │   │   ├── onboarding/
+│   │   │   │   └── page.tsx          8-step onboarding flow
+│   │   │   ├── settings/
+│   │   │   │   └── page.tsx          All settings (profile, theme, coach, digest, password)
+│   │   │   └── therapist/
+│   │   │       └── page.tsx          redirect("/coach") — legacy route kept
+│   │   ├── login/page.tsx
+│   │   ├── register/page.tsx
+│   │   ├── privacy/page.tsx
+│   │   └── terms/page.tsx
 │   │
 │   ├── api/
 │   │   ├── auth/
-│   │   │   ├── [...nextauth]/route.ts  NextAuth handlers
-│   │   │   ├── check-verification/     Email verification status
-│   │   │   ├── forgot-password/        OTP generation + email
-│   │   │   ├── logout/route.ts         Cookie-clearing logout (Node runtime)
-│   │   │   ├── register/               Account creation
-│   │   │   ├── resend-verification/    Re-send verification
-│   │   │   └── reset-password/         Apply reset + re-wrap MEK
+│   │   │   ├── [...nextauth]/route.ts
+│   │   │   ├── check-verification/route.ts
+│   │   │   ├── forgot-password/route.ts
+│   │   │   ├── logout/route.ts       Node runtime — clears cookies
+│   │   │   ├── register/route.ts
+│   │   │   ├── resend-verification/route.ts
+│   │   │   └── reset-password/route.ts
 │   │   │
 │   │   ├── coach/
-│   │   │   ├── chat/route.ts           Streaming coach (main endpoint)
-│   │   │   ├── extract/route.ts        Memory extraction
-│   │   │   ├── retrieve/route.ts       Semantic search
-│   │   │   └── safety/route.ts         Distress pre-check
+│   │   │   ├── chat/route.ts         Streaming coach (main endpoint)
+│   │   │   ├── extract/route.ts      Memory extraction
+│   │   │   ├── retrieve/route.ts     Semantic context search
+│   │   │   ├── safety/route.ts       Distress pre-check
+│   │   │   └── sessions/
+│   │   │       ├── route.ts          List + create sessions
+│   │   │       └── [id]/
+│   │   │           ├── route.ts      Get/update/delete session
+│   │   │           ├── messages/route.ts
+│   │   │           └── generate-title/route.ts
 │   │   │
-│   │   ├── digest/weekly/route.ts      Weekly email digest
-│   │   ├── grammar/route.ts            Grammar check
+│   │   ├── digest/
+│   │   │   └── weekly/route.ts       Weekly email digest (+ Vercel Cron target)
 │   │   │
 │   │   ├── entries/
-│   │   │   ├── route.ts                List + create
-│   │   │   ├── [id]/
-│   │   │   │   ├── route.ts            Get/update/delete
-│   │   │   │   ├── chat/route.ts       Conversation history per entry
-│   │   │   │   └── media/
-│   │   │   │       ├── route.ts        List/upload attachments
-│   │   │   │       └── [mediaId]/      Delete attachment
-│   │   │   ├── bulk-delete/route.ts    Multi-delete
-│   │   │   ├── export/route.ts         All entries for export
-│   │   │   └── recent/route.ts         Last N entries (coach context)
+│   │   │   ├── route.ts              List + create
+│   │   │   ├── bulk-delete/route.ts
+│   │   │   ├── export/route.ts
+│   │   │   ├── recent/route.ts       Last N entries (coach context)
+│   │   │   └── [id]/
+│   │   │       ├── route.ts          Get/update/delete
+│   │   │       ├── chat/route.ts     Per-entry conversation history
+│   │   │       └── media/
+│   │   │           ├── route.ts      List/upload attachments
+│   │   │           └── [mediaId]/route.ts
+│   │   │
+│   │   ├── grammar/route.ts
 │   │   │
 │   │   ├── habits/
-│   │   │   ├── route.ts                List + create
-│   │   │   ├── [id]/
-│   │   │   │   ├── route.ts            Get/update/delete
-│   │   │   │   └── logs/route.ts       Toggle daily log
-│   │   │   └── insights/route.ts       AI habit analytics
+│   │   │   ├── route.ts
+│   │   │   ├── insights/route.ts
+│   │   │   └── [id]/
+│   │   │       ├── route.ts
+│   │   │       └── logs/route.ts
 │   │   │
 │   │   ├── memories/
-│   │   │   ├── route.ts                List + create
-│   │   │   └── [id]/route.ts           Get/delete
+│   │   │   ├── route.ts
+│   │   │   └── [id]/route.ts
 │   │   │
-│   │   ├── mood/calendar/route.ts      Mood heatmap data
-│   │   ├── prompts/daily/route.ts      Daily journaling prompt
-│   │   ├── session-summary/route.ts    Summarize coach session
+│   │   ├── mood/
+│   │   │   └── calendar/route.ts
 │   │   │
-│   │   ├── therapist/
-│   │   │   ├── chat/route.ts           Streaming therapist chat
-│   │   │   ├── insights/route.ts       Mood analytics
-│   │   │   └── reflect/route.ts        Post-entry reflection
+│   │   ├── prompts/
+│   │   │   └── daily/route.ts
+│   │   │
+│   │   ├── session-summary/route.ts
+│   │   │
+│   │   ├── therapist/                Legacy routes (kept for compatibility)
+│   │   │   ├── chat/route.ts
+│   │   │   ├── insights/route.ts
+│   │   │   └── reflect/route.ts
+│   │   │
+│   │   ├── transcribe/route.ts       OpenAI Whisper
 │   │   │
 │   │   └── user/
-│   │       ├── key-bundle/route.ts     Fetch encrypted MEK
-│   │       ├── migrate-keys/route.ts   One-time key migration
-│   │       ├── password/route.ts       Change password + re-wrap
-│   │       └── preferences/route.ts    Get/update all settings
+│   │       ├── key-bundle/route.ts
+│   │       ├── migrate-keys/route.ts
+│   │       ├── password/route.ts
+│   │       └── preferences/route.ts
 │   │
-│   ├── layout.tsx                      Root layout (providers, fonts)
-│   └── page.tsx                        Landing page or redirect
+│   ├── apple-icon.tsx                PWA apple touch icon 180×180 (ImageResponse)
+│   ├── icon.tsx                      PWA app icon 512×512 (ImageResponse)
+│   ├── layout.tsx                    Root layout (providers, fonts, Analytics, SpeedInsights)
+│   ├── manifest.ts                   Web App Manifest (PWA)
+│   ├── page.tsx                      Landing page or redirect
+│   ├── robots.ts                     robots.txt (allows /, /privacy, /terms; blocks app/api paths)
+│   └── sitemap.ts                    sitemap.xml (/, /privacy, /terms)
 │
 ├── components/
-│   ├── CoachPanel.tsx                  AI coach chat sidebar
-│   ├── JournalEditor.tsx               Rich text editor (main editing UI)
-│   ├── EntryList.tsx                   Entry grid/list with bulk actions
-│   ├── HabitsPanel.tsx                 Sidebar habit quick-check
-│   ├── HabitsProgress.tsx              Progress rings + stats
-│   ├── MoodCalendar.tsx                Calendar mood heatmap
-│   ├── LockScreen.tsx                  Master password gate
-│   ├── SplashScreen.tsx                Welcome animation
-│   ├── PageTransition.tsx              Framer Motion page wrapper
-│   ├── ThemeProvider.tsx               Color theme + dark mode context
-│   ├── SessionProvider.tsx             NextAuth provider wrapper
-│   ├── AuthNav.tsx                     Auth page navigation
-│   ├── landing/                        Public landing page sections
-│   └── ui/                             Primitive UI components (button, input, etc.)
+│   ├── CoachPanel.tsx
+│   ├── JournalEditor.tsx
+│   ├── EntryList.tsx
+│   ├── HabitsPanel.tsx
+│   ├── HabitsProgress.tsx
+│   ├── MoodCalendar.tsx
+│   ├── LockScreen.tsx
+│   ├── SplashScreen.tsx
+│   ├── PageTransition.tsx
+│   ├── ThemeProvider.tsx
+│   ├── SessionProvider.tsx
+│   ├── AuthNav.tsx
+│   ├── landing/                      Public landing page sections
+│   └── ui/                           Primitive UI components (button, input, etc.)
 │
 ├── lib/
 │   ├── ai/
-│   │   ├── claude.ts                   Anthropic SDK client
-│   │   └── prompts.ts                  All system prompts (6 exports)
-│   ├── auth.ts                         NextAuth full config (Node runtime)
-│   ├── crypto.ts                       All encryption/decryption functions
-│   ├── db.ts                           Prisma client singleton
-│   ├── email.ts                        Resend email templates
-│   ├── prompts/journaling.ts           Journaling prompt bank
-│   ├── quotes.ts                       Quote categories + data
-│   ├── rate-limit.ts                   Upstash rate limiter setup
-│   ├── streak.ts                       Streak calculation helpers
-│   └── utils.ts                        General utilities (cn, formatDate, etc.)
+│   │   ├── claude.ts                 Anthropic SDK client singleton
+│   │   └── prompts.ts                All system prompts (6 exports)
+│   ├── analytics.ts                  Typed track() wrapper for Vercel Analytics
+│   ├── auth.ts                       NextAuth full config (Node runtime)
+│   ├── crypto.ts                     All AES-256-GCM encryption/decryption functions
+│   ├── db.ts                         Prisma client singleton
+│   ├── email.ts                      Resend email templates (verify, reset, digest)
+│   ├── password-strength.ts          Password scoring + server-side validation
+│   ├── prompts/journaling.ts         Journaling prompt bank
+│   ├── quotes.ts                     Quote categories + data
+│   ├── rate-limit.ts                 Upstash rate limiter setup
+│   ├── storage.ts                    Supabase Storage upload/delete helpers
+│   ├── streak.ts                     Streak calculation helpers
+│   ├── utils.ts                      General utilities (cn, formatDate, etc.)
+│   └── validation.ts                 Zod schemas + parseBody() helper
 │
 ├── prisma/
-│   ├── schema.prisma                   All DB models (PostgreSQL)
-│   └── migrations/                     Migration history
+│   ├── schema.prisma
+│   └── migrations/
+│       ├── 20260428000000_init/
+│       └── 20260429000000_media_object_storage/
 │
-├── public/                             Static assets (icons, images)
-├── scripts/                            Build + deploy helpers
+├── __tests__/
+│   └── lib/
+│       ├── crypto.test.ts            40 tests: MEK, KEK, legacy, tamper detection
+│       └── password-strength.test.ts 18 tests: scoring, requirements, common passwords
 │
-├── auth.config.ts                      Edge-compatible NextAuth config (JWT + route gating)
-├── proxy.ts                            Edge middleware (auth + security headers)
-├── next.config.ts                      Next.js config
-├── tailwind.config.ts                  Tailwind config
-├── tsconfig.json                       TypeScript config
-├── package.json                        Dependencies
-└── .env / .env.local                   Secrets (never commit)
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    Two jobs: check (lint+test+build) + deploy (→ Vercel)
+│
+├── public/                           Static assets
+│
+├── auth.config.ts                    Edge-compatible NextAuth config
+├── proxy.ts                          Edge middleware (auth + security headers)
+├── instrumentation.ts                Registers Sentry server/edge configs (NEXT_RUNTIME)
+├── sentry.client.config.ts           Browser: session replay, beforeSend strips body
+├── sentry.server.config.ts           Node: beforeSend strips body + auth headers
+├── sentry.edge.config.ts             Minimal edge runtime Sentry init
+├── next.config.ts                    Next.js config (includes Sentry plugin)
+├── tailwind.config.ts
+├── tsconfig.json
+├── vercel.json                       Function maxDuration + Cron Jobs config
+├── vitest.config.ts                  Node env, 15s timeout for PBKDF2
+├── package.json
+└── .env                              Secrets (never commit)
 ```
 
 ---
 
 ## 14. Environment Variables
 
-```bash
-# Database
-DATABASE_URL="postgresql://..."
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Supabase PostgreSQL connection string (direct port 5432, not pooled) |
+| `NEXTAUTH_SECRET` / `AUTH_SECRET` | NextAuth JWT signing secret |
+| `NEXTAUTH_URL` | App base URL (required on Vercel) |
+| `ANTHROPIC_API_KEY` | Claude API (coach, digest, grammar, prompts) |
+| `OPENAI_API_KEY` | OpenAI Whisper transcription |
+| `RESEND_API_KEY` | Transactional email |
+| `RESEND_FROM` | Sender address e.g. `Vaultly <noreply@yourdomain.com>` |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis for rate limiting |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis auth token |
+| `SUPABASE_URL` | Supabase project URL `https://<ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Storage uploads (secret — never expose client-side) |
+| `CRON_SECRET` | Weekly digest cron authentication (Vercel sends `Authorization: Bearer <secret>`) |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry DSN (safe to expose publicly) |
+| `SENTRY_AUTH_TOKEN` | Sentry source map upload (secret) |
+| `SENTRY_ORG` | Sentry org slug |
+| `SENTRY_PROJECT` | Sentry project slug |
 
-# NextAuth
-NEXTAUTH_SECRET="..."          # JWT signing secret (required)
-NEXTAUTH_URL="https://..."     # App URL (required on Vercel)
-
-# Anthropic
-ANTHROPIC_API_KEY="sk-ant-..."
-
-# Resend (email)
-RESEND_API_KEY="re_..."
-RESEND_FROM_EMAIL="hello@yourdomain.com"
-
-# Upstash (rate limiting)
-UPSTASH_REDIS_REST_URL="https://..."
-UPSTASH_REDIS_REST_TOKEN="..."
-```
+**Local dev:** All vars live in `.env` (never committed). Vercel vars set separately via dashboard or CLI.
 
 ---
 
@@ -1179,39 +1405,75 @@ UPSTASH_REDIS_REST_TOKEN="..."
 
 10. **Vercel auto-deploy owns the production alias** — If you run `vercel --prod --yes` manually, you'll get a different alias than the GitHub integration deploys to. Push to `main` via Git to deploy to the canonical production URL.
 
+11. **Never read `EntryMedia.data`** — The `data Bytes` column was dropped in migration `20260429000000_media_object_storage`. Media binary data now lives in Supabase Storage. Always use `storageUrl`. Accessing `data` will throw a Prisma error.
+
+12. **Always use `parseBody()` for API routes that accept JSON** — `lib/validation.ts` exports `parseBody(rawText, schema, maxBytes)` which handles byte-size limits, JSON parsing errors, and Zod validation in one call, returning a ready-made `NextResponse` on failure. Every API route that accepts a JSON body must use this — do not roll your own parsing.
+
+13. **Vercel Cron auth is `Authorization: Bearer`** — The digest cron uses the standard `Authorization: Bearer <CRON_SECRET>` header, not a custom `x-cron-secret` header. Set `CRON_SECRET` in Vercel environment variables. Use `printf` (not `echo`) when setting via CLI to avoid trailing newline.
+
+14. **Schema changes: always use `migrate`, never `db push`** — `npx prisma db push` bypasses migration history. Always use `npx prisma migrate dev --name <description>` for dev and `npx prisma migrate deploy` for production.
+
+15. **Media upload uses `ArrayBuffer`, not `Buffer`** — `lib/storage.ts` accepts `fileBuffer: ArrayBuffer` (not Node `Buffer`) to satisfy TypeScript's `BodyInit` type for the fetch API. Call `file.arrayBuffer()` directly in the route handler and pass the result.
+
 ---
 
-## 16. Deployment
+## 16. Deployment & CI/CD
+
+### CI Pipeline (GitHub Actions)
+
+**File:** `.github/workflows/ci.yml`
+
+Two jobs run on every push and PR to `main`:
+
+| Job | Trigger | Steps |
+|---|---|---|
+| `check` | Every push + every PR to `main` | `npm ci` → ESLint lint → `npm test` (Vitest) → `npm run build` |
+| `deploy` | Push to `main` only (after `check` passes) | `vercel deploy --prod` |
+
+CI uses placeholder env vars so `next build` compiles without a real DB connection. The `VERCEL_TOKEN` secret must be set in GitHub repo Settings → Secrets.
+
+### Running Tests
+
+```bash
+npm test          # Run all tests once (Vitest)
+npm run test:watch  # Watch mode
+```
+
+Test files: `__tests__/lib/crypto.test.ts` (40 tests) and `__tests__/lib/password-strength.test.ts` (18 tests).
 
 ### Production Environment
 - **Hosting:** Vercel
-- **Production URL:** `vaultly-sepia.vercel.app` (owned by GitHub auto-deploy)
-- **Database:** PostgreSQL (Supabase or self-hosted)
-- **Branch:** `main` → auto-deploys on push
+- **Production URL:** `vaultly-sepia.vercel.app`
+- **Database:** PostgreSQL (Supabase)
+- **Branch:** `main` → auto-deploys on push via GitHub Actions
 
 ### Deploy Process
 ```bash
-git push origin main    # Triggers Vercel GitHub integration → production deploy
+git push origin main    # Triggers GitHub Actions → Vercel production deploy
 ```
 
 ### After Any Backend Schema Change
 ```bash
-npx prisma db push      # Push schema changes to DB
-npx prisma generate     # Regenerate Prisma client
-npm run build           # Verify TypeScript + build
-git push origin main    # Deploy
+npx prisma migrate dev --name <description>   # Create + apply migration (dev)
+npx prisma migrate deploy                     # Apply to production
+npm run build                                 # Verify TypeScript compiles (prisma generate is part of build)
+git push origin main                          # Deploy
 ```
 
-### Build Command (includes Prisma generate)
+### Build Command
 ```json
 "build": "prisma generate && next build"
 ```
+Prisma generates the client first, then Next.js builds. Source maps are uploaded to Sentry at build time and deleted from the deploy output.
 
 ### Backup
 - Raspberry Pi runs shell scripts + cron jobs to back up the PostgreSQL database
 - No Node.js on the Pi — shell-only scripts
 - Separate from Vercel deployment; Pi has its own SSH access to the DB
 
+### Cron Jobs
+- **Weekly Digest:** Configured in `vercel.json` — fires daily at 09:00 UTC, hits `GET /api/digest/weekly` with `Authorization: Bearer <CRON_SECRET>`
+
 ---
 
-*End of master reference. Last updated: 2026-04-27.*
+*End of master reference. Last updated: 2026-04-30.*

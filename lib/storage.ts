@@ -87,12 +87,14 @@ export async function uploadMedia(
 }
 
 /**
- * Generate signed fetch URLs for one or more storage paths in a single API call.
+ * Generate signed fetch URLs for one or more storage paths.
+ *
+ * Uses individual per-object signed URL endpoints in parallel to avoid
+ * authentication issues with the batch endpoint.
  *
  * Input:  array of bare storage paths ("{userId}/{mediaId}-{name}") OR legacy
  *         full CDN URLs (extractStoragePath handles both transparently).
- * Output: Record<path, signedUrl> — keys are the bare paths as provided.
- *         Paths that fail to sign are omitted from the result.
+ * Output: Record<originalStorageUrl, signedUrl> — failed paths are omitted.
  *
  * Signed URLs expire in SIGNED_URL_TTL seconds (1 hour).
  * The client uses these directly as fetch targets, then decrypts in-browser.
@@ -103,37 +105,46 @@ export async function getSignedUrls(
 ): Promise<Record<string, string>> {
   if (storageUrls.length === 0) return {}
 
-  const paths = storageUrls.map(extractStoragePath)
+  const entries = await Promise.all(
+    storageUrls.map(async (storageUrl) => {
+      const path = extractStoragePath(storageUrl)
 
-  const res = await fetch(
-    `${baseUrl()}/storage/v1/object/sign/${BUCKET}`,
-    {
-      method:  "POST",
-      headers: {
-        "Authorization": `Bearer ${serviceKey()}`,
-        "Content-Type":  "application/json",
-      },
-      body: JSON.stringify({ expiresIn, paths }),
-    },
+      try {
+        const res = await fetch(
+          `${baseUrl()}/storage/v1/object/sign/${BUCKET}/${path}`,
+          {
+            method:  "POST",
+            headers: {
+              "Authorization": `Bearer ${serviceKey()}`,
+              "Content-Type":  "application/json",
+            },
+            body: JSON.stringify({ expiresIn }),
+          },
+        )
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => "")
+          console.error(`[storage] sign failed for "${path}": ${res.status} ${body}`)
+          return [storageUrl, null] as const
+        }
+
+        const data = await res.json() as { signedURL?: string }
+        if (!data.signedURL) {
+          console.error(`[storage] no signedURL returned for "${path}"`, data)
+          return [storageUrl, null] as const
+        }
+
+        return [storageUrl, `${baseUrl()}${data.signedURL}`] as const
+      } catch (err) {
+        console.error(`[storage] sign error for "${path}":`, err)
+        return [storageUrl, null] as const
+      }
+    }),
   )
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "")
-    throw new Error(`Supabase signed URL failed (${res.status}): ${body}`)
-  }
-
-  // Supabase returns: [{ error: null, path: "...", signedURL: "/storage/v1/object/sign/..." }]
-  const rows = await res.json() as Array<{ error: string | null; path: string; signedURL: string }>
-  const result: Record<string, string> = {}
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    if (row.error || !row.signedURL) continue
-    // Key by the original storageUrl value that was passed in (before path extraction)
-    result[storageUrls[i]] = `${baseUrl()}${row.signedURL}`
-  }
-
-  return result
+  return Object.fromEntries(
+    entries.filter((entry): entry is [string, string] => entry[1] !== null),
+  )
 }
 
 /**
