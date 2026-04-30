@@ -14,9 +14,9 @@ export async function GET(
     where: { id, userId: session.user.id },
     include: {
       moodLog: { select: { mood: true } },
-      // Metadata only — raw bytes are served via GET /media/[mediaId]
+      // Metadata + CDN URL — displayed directly from Supabase Storage
       media: {
-        select: { id: true, fileName: true, mimeType: true, fileSize: true, caption: true, createdAt: true },
+        select: { id: true, fileName: true, mimeType: true, fileSize: true, caption: true, storageUrl: true, createdAt: true },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -32,13 +32,14 @@ export async function GET(
     salt:       entry.salt,
     createdAt:  entry.createdAt.toISOString(),
     mood:       entry.moodLog?.mood ?? null,
-    media:      entry.media.map((m: { id: string; fileName: string; mimeType: string; fileSize: number; caption: string | null; createdAt: Date }) => ({
-      id:        m.id,
-      fileName:  m.fileName,
-      mimeType:  m.mimeType,
-      fileSize:  m.fileSize,
-      caption:   m.caption,
-      createdAt: m.createdAt.toISOString(),
+    media:      entry.media.map((m: { id: string; fileName: string; mimeType: string; fileSize: number; caption: string | null; storageUrl: string | null; createdAt: Date }) => ({
+      id:         m.id,
+      fileName:   m.fileName,
+      mimeType:   m.mimeType,
+      fileSize:   m.fileSize,
+      caption:    m.caption,
+      storageUrl: m.storageUrl,
+      createdAt:  m.createdAt.toISOString(),
     })),
   })
 }
