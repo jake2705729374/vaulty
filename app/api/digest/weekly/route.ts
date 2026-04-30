@@ -7,20 +7,26 @@ import { sendWeeklyDigest } from "@/lib/email"
 
 /**
  * GET /api/digest/weekly
- * Checks whether the authenticated user is due a digest and sends one.
- * Called client-side on dashboard load when digestEnabled = true.
- * Safe to call frequently — it no-ops if the last digest was < 6 days ago.
+ *
+ * Two callers:
+ *   1. Vercel Cron (daily at 09:00 UTC) — identified by
+ *      Authorization: Bearer <CRON_SECRET>.  Processes ALL opted-in users.
+ *   2. Client-side dashboard load — authenticated via NextAuth session.
+ *      Processes only the current user.  Safe to call frequently; the route
+ *      no-ops if the last digest was sent < 6 days ago.
  */
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  // Also support Vercel cron via CRON_SECRET header (processes all users)
-  const isCron = req.headers.get("x-cron-secret") === process.env.CRON_SECRET
-
-  if (isCron) {
+  // ── Vercel Cron path ─────────────────────────────────────────────────────
+  // Vercel sends  Authorization: Bearer <CRON_SECRET>  on scheduled invocations.
+  const authHeader = req.headers.get("authorization")
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
     return handleCronDigest()
   }
+
+  // ── Authenticated user path ──────────────────────────────────────────────
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   return handleUserDigest(session.user.id, session.user.email ?? "")
 }

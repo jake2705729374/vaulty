@@ -350,7 +350,30 @@ export default function CoachPage() {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ role: "assistant", content: assistantText }),
-      }).then(() => loadSessions()).catch(() => {})
+      })
+        .then(() => {
+          // Auto-rename: fire after the 4th message (2nd full exchange).
+          // newMessages has [user1, asst1, user2] at this point; +1 for the
+          // assistant reply just saved = 4 total.
+          const totalAfterSave = newMessages.length + 1
+          if (totalAfterSave === 4) {
+            fetch(`/api/coach/sessions/${sessionId}/generate-title`, {
+              method: "POST",
+            })
+              .then((r) => r.ok ? r.json() : null)
+              .then((data) => {
+                if (data?.title) {
+                  // Update title in sidebar list immediately
+                  setSessions((prev) =>
+                    prev.map((s) => s.id === sessionId ? { ...s, title: data.title } : s),
+                  )
+                }
+              })
+              .catch(() => {/* non-fatal */})
+          }
+          return loadSessions()
+        })
+        .catch(() => {})
     }
   }
 

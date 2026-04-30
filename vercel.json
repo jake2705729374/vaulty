@@ -3,5 +3,11 @@
     "app/api/entries/[id]/media/route.ts": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/digest/weekly",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }
