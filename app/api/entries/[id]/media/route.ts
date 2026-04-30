@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
+import { uploadMedia } from "@/lib/storage"
 
 // 100 MB hard cap — covers high-res photos and short video clips
 const MAX_BYTES = 100 * 1024 * 1024
@@ -9,8 +10,7 @@ const ALLOWED_MIME_PREFIXES = ["image/", "video/"]
 
 // ── POST /api/entries/[id]/media ─────────────────────────────────────────────
 // Accepts multipart/form-data with a single "file" field.
-// Stores raw bytes in Postgres (EntryMedia.data) so that pg_dump / Pi backups
-// capture the media automatically alongside the encrypted entry text.
+// Uploads the file to Supabase Storage and stores the CDN URL in the DB.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -60,30 +60,50 @@ export async function POST(
     )
   }
 
-  // Read into a Node.js Buffer (stored as Postgres bytea)
-  const arrayBuffer = await file.arrayBuffer()
-  const data = Buffer.from(arrayBuffer)
-
+  // Create the DB record first to get a stable mediaId for the storage path
   const media = await prisma.entryMedia.create({
     data: {
       entryId,
-      userId: session.user.id,
-      data,
-      mimeType: file.type,
-      fileName: file.name,
-      fileSize: file.size,
+      userId:     session.user.id,
+      storageUrl: null,           // filled in after upload succeeds
+      mimeType:   file.type,
+      fileName:   file.name,
+      fileSize:   file.size,
     },
+    select: { id: true },
+  })
+
+  // Upload file bytes to Supabase Storage
+  let storageUrl: string
+  try {
+    const arrayBuffer = await file.arrayBuffer()
+    storageUrl = await uploadMedia(arrayBuffer, file.type, file.name, session.user.id, media.id)
+  } catch (err) {
+    // Clean up the orphaned DB record before surfacing the error
+    await prisma.entryMedia.delete({ where: { id: media.id } }).catch(() => {})
+    console.error("[media upload] storage error:", err)
+    return NextResponse.json(
+      { error: "Failed to upload file. Please try again." },
+      { status: 502 },
+    )
+  }
+
+  // Persist the CDN URL
+  const updated = await prisma.entryMedia.update({
+    where:  { id: media.id },
+    data:   { storageUrl },
     select: {
-      id:        true,
-      fileName:  true,
-      mimeType:  true,
-      fileSize:  true,
-      caption:   true,
-      createdAt: true,
+      id:         true,
+      fileName:   true,
+      mimeType:   true,
+      fileSize:   true,
+      caption:    true,
+      storageUrl: true,
+      createdAt:  true,
     },
   })
 
-  return NextResponse.json(media, { status: 201 })
+  return NextResponse.json(updated, { status: 201 })
 }
 
 // ── GET /api/entries/[id]/media ──────────────────────────────────────────────
@@ -109,7 +129,15 @@ export async function GET(
 
   const media = await prisma.entryMedia.findMany({
     where: { entryId, userId: session.user.id },
-    select: { id: true, fileName: true, mimeType: true, fileSize: true, caption: true, createdAt: true },
+    select: {
+      id:         true,
+      fileName:   true,
+      mimeType:   true,
+      fileSize:   true,
+      caption:    true,
+      storageUrl: true,
+      createdAt:  true,
+    },
     orderBy: { createdAt: "asc" },
   })
 

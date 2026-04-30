@@ -64,20 +64,20 @@ model Entry {
   @@index([userId, createdAt])
 }
 
-// Photos and videos attached to an entry — stored as raw bytes in Postgres
-// so they are included in pg_dump backups automatically.
+// Photos and videos attached to an entry — stored in Supabase Storage (object storage).
+// Only the CDN URL is kept in Postgres; binary data never enters the DB.
 model EntryMedia {
-  id        String   @id @default(cuid())
-  entryId   String
-  userId    String
-  data      Bytes    // raw binary (image / video)
-  mimeType  String
-  fileName  String
-  fileSize  Int      // bytes
-  caption   String?  // optional user-written caption / comment
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  entryId    String
+  userId     String
+  storageUrl String?  // public Supabase Storage CDN URL; null for legacy rows
+  mimeType   String
+  fileName   String
+  fileSize   Int      // bytes
+  caption    String?  // optional user-written caption / comment
+  createdAt  DateTime @default(now())
 
-  entry     Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
   @@index([entryId])
   @@index([userId])

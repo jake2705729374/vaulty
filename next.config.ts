@@ -38,11 +38,13 @@ const cspDirectives = [
   // It is intentionally excluded in production — React never uses eval() there.
   `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  // *.supabase.co — Supabase Storage CDN for photos/videos uploaded to entries
+  "img-src 'self' data: blob: https://*.supabase.co",
   "font-src 'self'",
   // 'self' for same-origin API calls; *.ingest.sentry.io for Sentry error reporting
   "connect-src 'self' https://*.ingest.sentry.io",
-  "media-src 'self' blob:",
+  // blob: for local recordings; *.supabase.co for video media stored in Supabase Storage
+  "media-src 'self' blob: https://*.supabase.co",
   "frame-ancestors 'none'",    // stronger than X-Frame-Options
   "object-src 'none'",         // block Flash / plugins
   "base-uri 'self'",           // prevent <base> tag injection

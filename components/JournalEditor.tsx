@@ -239,14 +239,16 @@ function ltCategoryStyle(catId: string): { label: string; bg: string; color: str
 export type SaveData = { title: string; content: string; mood: string | null }
 
 export interface MediaMeta {
-  id:        string
-  fileName:  string
-  mimeType:  string
-  fileSize:  number
-  caption:   string | null
-  createdAt: string
+  id:         string
+  fileName:   string
+  mimeType:   string
+  fileSize:   number
+  caption:    string | null
+  createdAt:  string
+  /** Supabase Storage CDN URL — persisted in DB, loaded from API on subsequent visits. */
+  storageUrl?: string | null
   /** In-memory only — blob URL from the upload for instant display. Never persisted. */
-  blobUrl?:  string
+  blobUrl?:   string
 }
 
 export interface JournalEditorProps {
@@ -1492,7 +1494,7 @@ export default function JournalEditor({
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={item.blobUrl ?? `/api/entries/${entryId}/media/${item.id}`}
+                    src={item.blobUrl ?? item.storageUrl ?? ""}
                     alt={item.fileName}
                     className="w-full h-full object-cover"
                   />
@@ -1905,7 +1907,7 @@ export default function JournalEditor({
               {isVideo ? (
                 <video
                   key={item.id}
-                  src={`/api/entries/${entryId}/media/${item.id}`}
+                  src={item.blobUrl ?? item.storageUrl ?? ""}
                   controls
                   autoPlay
                   className="rounded-xl shadow-2xl"
@@ -1915,7 +1917,7 @@ export default function JournalEditor({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={item.id}
-                  src={`/api/entries/${entryId}/media/${item.id}`}
+                  src={item.blobUrl ?? item.storageUrl ?? ""}
                   alt={item.fileName}
                   className="rounded-xl shadow-2xl object-contain"
                   style={{ maxWidth: "90vw", maxHeight: "78vh" }}
