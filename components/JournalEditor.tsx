@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from "react"
 import Link from "next/link"
 import CoachPanel, { type CoachContext } from "@/components/CoachPanel"
 import HabitsPanel from "@/components/HabitsPanel"
-import { encryptWithMek, decryptWithMek } from "@/lib/crypto"
+import { encryptWithMek, decryptWithMek, encryptMedia, decryptMedia } from "@/lib/crypto"
 import { track } from "@/lib/analytics"
 
 // ── Dictation mime-type helper ────────────────────────────────────────────
@@ -246,9 +246,11 @@ export interface MediaMeta {
   fileSize:   number
   caption:    string | null
   createdAt:  string
-  /** Supabase Storage CDN URL — persisted in DB, loaded from API on subsequent visits. */
-  storageUrl?: string | null
-  /** In-memory only — blob URL from the upload for instant display. Never persisted. */
+  /** Base64 AES-GCM IV. Present → file is encrypted. Null → legacy unencrypted file. */
+  mediaIv?:   string | null
+  /** Short-lived Supabase signed URL for fetching encrypted bytes. Provided by the server on load. */
+  signedUrl?: string | null
+  /** In-memory only — decrypted blob URL for instant display. Never persisted. */
   blobUrl?:   string
 }
 
@@ -332,6 +334,10 @@ export default function JournalEditor({
   const [uploadingItems, setUploadingItems] = useState<UploadingItem[]>([])
   const [mediaErrors,    setMediaErrors]    = useState<string[]>([])
   const [lightboxIndex,  setLightboxIndex]  = useState<number | null>(null)
+  // Decrypted blob URLs, keyed by mediaId. Populated by the decryption useEffect when mek is
+  // available. Keys are removed on item deletion. All URLs are revoked on component unmount.
+  const [decryptedUrls,  setDecryptedUrls]  = useState<Record<string, string>>({})
+  const decryptedUrlsRef = useRef<Record<string, string>>({})
   const [mediaDeleteConfirm, setMediaDeleteConfirm] = useState<{ mediaId: string; mimeType: string } | null>(null)
   const [mediaDeletingId,    setMediaDeletingId]    = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -457,6 +463,54 @@ export default function JournalEditor({
   // savedMedia mutation — the stale savedMedia at mek-unlock time is intentional.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mek])
+
+  // Keep decryptedUrlsRef in sync so the unmount cleanup can revoke all URLs.
+  useEffect(() => { decryptedUrlsRef.current = decryptedUrls }, [decryptedUrls])
+
+  // Revoke all decrypted blob URLs on unmount to free browser memory.
+  useEffect(() => {
+    return () => {
+      Object.values(decryptedUrlsRef.current).forEach((url) => URL.revokeObjectURL(url))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Decrypt encrypted media files when MEK becomes available (or when new items are added).
+  // For each item that has mediaIv (encrypted) and no blobUrl (not a fresh upload):
+  //   1. Fetch ciphertext from the signed URL
+  //   2. Decrypt with the MEK
+  //   3. Create a blob URL from the decrypted bytes
+  //   4. Store in decryptedUrls so the thumbnail/lightbox can render it
+  useEffect(() => {
+    if (!mek) return
+    const toDecrypt = savedMedia.filter((item) => item.mediaIv && item.signedUrl && !item.blobUrl)
+    if (toDecrypt.length === 0) return
+
+    let cancelled = false
+    ;(async () => {
+      const entries: Array<[string, string]> = []
+      for (const item of toDecrypt) {
+        if (!item.signedUrl || !item.mediaIv) continue
+        try {
+          const res = await fetch(item.signedUrl)
+          if (!res.ok) continue
+          const encrypted = await res.arrayBuffer()
+          const decrypted = await decryptMedia(encrypted, item.mediaIv, mek)
+          const blobUrl   = URL.createObjectURL(new Blob([decrypted], { type: item.mimeType }))
+          entries.push([item.id, blobUrl])
+        } catch {
+          // Decryption failure — skip item; it will show as a broken placeholder
+        }
+      }
+      if (!cancelled && entries.length > 0) {
+        setDecryptedUrls((prev) => ({ ...prev, ...Object.fromEntries(entries) }))
+      }
+    })()
+
+    return () => { cancelled = true }
+  // Re-run when mek becomes available OR when new encrypted items appear (length change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mek, savedMedia.length])
 
   // Auto-resize caption textarea whenever captionText changes (user typing OR
   // programmatic value changes when navigating between images).
@@ -839,9 +893,24 @@ export default function JournalEditor({
       setUploadingItems((p) => [...p, { tempId, fileName: file.name, mimeType: file.type, preview }])
 
       try {
-        const compressed = await compressImage(file)
-        const form = new FormData()
-        form.append("file", compressed)
+        const compressed  = await compressImage(file)
+        const form        = new FormData()
+
+        if (mek) {
+          // Encrypt the file bytes before upload so the server only ever
+          // receives ciphertext. The IV is sent as a separate form field.
+          const arrayBuffer = await compressed.arrayBuffer()
+          const { ciphertext, iv } = await encryptMedia(arrayBuffer, mek)
+          form.append("file", new Blob([ciphertext], { type: "application/octet-stream" }), compressed.name)
+          form.append("iv",       iv)
+          form.append("mimeType", compressed.type)
+          form.append("fileName", compressed.name)
+          form.append("fileSize", String(compressed.size))
+        } else {
+          // No MEK available — upload plaintext (should not happen in normal usage
+          // since the attach button is disabled without a MEK).
+          form.append("file", compressed)
+        }
 
         const uploadUrl = `/api/entries/${entryId}/media`
         let res = await fetch(uploadUrl, { method: "POST", body: form })
@@ -912,6 +981,14 @@ export default function JournalEditor({
           const removed = p.find((m) => m.id === mediaId)
           if (removed?.blobUrl) URL.revokeObjectURL(removed.blobUrl)
           return p.filter((m) => m.id !== mediaId)
+        })
+        // Revoke and remove the decrypted blob URL for this item
+        setDecryptedUrls((prev) => {
+          const url = prev[mediaId]
+          if (url) URL.revokeObjectURL(url)
+          const next = { ...prev }
+          delete next[mediaId]
+          return next
         })
         // Close lightbox if it was showing the deleted item
         if (lightboxIndex !== null && savedMedia[lightboxIndex]?.id === mediaId) {
@@ -1025,6 +1102,18 @@ export default function JournalEditor({
     } finally {
       setSaving(false)
     }
+  }
+
+  // Resolve the best available display URL for a media item:
+  //   1. blobUrl  — set immediately after upload, no network round-trip
+  //   2. decryptedUrls[id] — decrypted blob URL (populated by the decryption useEffect)
+  //   3. signedUrl — for legacy UNENCRYPTED files (mediaIv is null); used as-is for <img>/<video>
+  //   4. ""  — encrypted file still being decrypted; component renders an empty placeholder
+  function getMediaSrc(item: MediaMeta): string {
+    if (item.blobUrl)                       return item.blobUrl
+    if (decryptedUrls[item.id])             return decryptedUrls[item.id]
+    if (!item.mediaIv && item.signedUrl)    return item.signedUrl
+    return ""
   }
 
   const today = new Date().toLocaleDateString("en-US", {
@@ -1336,17 +1425,17 @@ export default function JournalEditor({
         {/* ── Media attach ── */}
         <div className="w-px h-5 mx-1 flex-shrink-0" style={{ backgroundColor: "var(--color-border)" }} />
         <button
-          onClick={() => entryId ? fileInputRef.current?.click() : undefined}
-          disabled={!entryId}
-          title={entryId ? "Attach photo or video" : "Entry saves automatically — media unlocks in a moment"}
+          onClick={() => (entryId && mek) ? fileInputRef.current?.click() : undefined}
+          disabled={!entryId || !mek}
+          title={!entryId ? "Entry saves automatically — media unlocks in a moment" : !mek ? "Unlock your journal first to attach media" : "Attach photo or video"}
           className="flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-inter font-medium transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
             backgroundColor: "var(--color-surface-2)",
             color: "var(--color-ink-muted)",
             border: "1px solid var(--color-border)",
           }}
-          onMouseEnter={(e) => { if (entryId) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
-          onMouseLeave={(e) => { if (entryId) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
+          onMouseEnter={(e) => { if (entryId && mek) e.currentTarget.style.backgroundColor = "var(--color-border)" }}
+          onMouseLeave={(e) => { if (entryId && mek) e.currentTarget.style.backgroundColor = "var(--color-surface-2)" }}
         >
           <IconPhoto />
           <span className="hidden sm:inline">Media</span>
@@ -1523,7 +1612,7 @@ export default function JournalEditor({
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={item.blobUrl ?? item.storageUrl ?? ""}
+                    src={getMediaSrc(item)}
                     alt={item.fileName}
                     className="w-full h-full object-cover"
                   />
@@ -1936,7 +2025,7 @@ export default function JournalEditor({
               {isVideo ? (
                 <video
                   key={item.id}
-                  src={item.blobUrl ?? item.storageUrl ?? ""}
+                  src={getMediaSrc(item)}
                   controls
                   autoPlay
                   className="rounded-xl shadow-2xl"
@@ -1946,7 +2035,7 @@ export default function JournalEditor({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={item.id}
-                  src={item.blobUrl ?? item.storageUrl ?? ""}
+                  src={getMediaSrc(item)}
                   alt={item.fileName}
                   className="rounded-xl shadow-2xl object-contain"
                   style={{ maxWidth: "90vw", maxHeight: "78vh" }}

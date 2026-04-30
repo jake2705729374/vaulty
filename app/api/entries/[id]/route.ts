@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { EntryBodySchema, MAX_ENTRY_BODY_BYTES, parseBody } from "@/lib/validation"
+import { getSignedUrls } from "@/lib/storage"
 
 export async function GET(
   _req: NextRequest,
@@ -15,15 +16,33 @@ export async function GET(
     where: { id, userId: session.user.id },
     include: {
       moodLog: { select: { mood: true } },
-      // Metadata + CDN URL — displayed directly from Supabase Storage
       media: {
-        select: { id: true, fileName: true, mimeType: true, fileSize: true, caption: true, storageUrl: true, createdAt: true },
+        select: {
+          id:         true,
+          fileName:   true,
+          mimeType:   true,
+          fileSize:   true,
+          caption:    true,
+          storageUrl: true,
+          mediaIv:    true,
+          createdAt:  true,
+        },
         orderBy: { createdAt: "asc" },
       },
     },
   })
 
   if (!entry) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  // Generate signed URLs for all media items in a single batch call.
+  // Each signed URL is valid for 1 hour — long enough for any editing session.
+  const pathsToSign = entry.media
+    .filter((m) => m.storageUrl)
+    .map((m) => m.storageUrl as string)
+
+  const signedMap = pathsToSign.length > 0
+    ? await getSignedUrls(pathsToSign).catch(() => ({} as Record<string, string>))
+    : {}
 
   return NextResponse.json({
     id:         entry.id,
@@ -33,14 +52,15 @@ export async function GET(
     salt:       entry.salt,
     createdAt:  entry.createdAt.toISOString(),
     mood:       entry.moodLog?.mood ?? null,
-    media:      entry.media.map((m: { id: string; fileName: string; mimeType: string; fileSize: number; caption: string | null; storageUrl: string | null; createdAt: Date }) => ({
-      id:         m.id,
-      fileName:   m.fileName,
-      mimeType:   m.mimeType,
-      fileSize:   m.fileSize,
-      caption:    m.caption,
-      storageUrl: m.storageUrl,
-      createdAt:  m.createdAt.toISOString(),
+    media: entry.media.map((m) => ({
+      id:        m.id,
+      fileName:  m.fileName,
+      mimeType:  m.mimeType,
+      fileSize:  m.fileSize,
+      caption:   m.caption,
+      mediaIv:   m.mediaIv,
+      signedUrl: m.storageUrl ? (signedMap[m.storageUrl] ?? null) : null,
+      createdAt: m.createdAt.toISOString(),
     })),
   })
 }
@@ -67,11 +87,10 @@ export async function PUT(
       title: title ?? "Untitled",
       ciphertext,
       iv,
-      salt,   // null for MEK-encrypted entries, base64 string for legacy
+      salt,
     },
   })
 
-  // Upsert mood log — mood is validated as a proper enum value by Zod
   if (mood) {
     await prisma.moodLog.upsert({
       where:  { entryId: id },

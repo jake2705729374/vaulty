@@ -210,3 +210,40 @@ export async function decryptWithMek(
   )
   return new TextDecoder().decode(raw)
 }
+
+// ── Binary media encryption with the MEK ─────────────────────────────────
+
+/**
+ * Encrypt a media file (photo/video) with the MEK.
+ * Works directly on ArrayBuffer — no text encoding/decoding.
+ * Returns { ciphertext: ArrayBuffer, iv: base64 string }.
+ * The ciphertext is 16 bytes larger than the input due to the AES-GCM auth tag.
+ */
+export async function encryptMedia(
+  fileBuffer: ArrayBuffer,
+  mek: CryptoKey,
+): Promise<{ ciphertext: ArrayBuffer; iv: string }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    mek,
+    fileBuffer,
+  )
+  return { ciphertext, iv: toBase64(iv) }
+}
+
+/**
+ * Decrypt a media file that was encrypted with encryptMedia.
+ * Returns the original file bytes as ArrayBuffer.
+ */
+export async function decryptMedia(
+  ciphertext: ArrayBuffer,
+  iv: string,
+  mek: CryptoKey,
+): Promise<ArrayBuffer> {
+  return crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromBase64(iv) },
+    mek,
+    ciphertext,
+  )
+}

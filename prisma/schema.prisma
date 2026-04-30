@@ -65,16 +65,19 @@ model Entry {
 }
 
 // Photos and videos attached to an entry — stored in Supabase Storage (object storage).
-// Only the CDN URL is kept in Postgres; binary data never enters the DB.
+// Only the storage path is kept in Postgres; binary data never enters the DB.
+// Files are AES-256-GCM encrypted client-side before upload; mediaIv holds the IV.
+// Legacy rows (mediaIv = null) were uploaded before encryption was added.
 model EntryMedia {
   id         String   @id @default(cuid())
   entryId    String
   userId     String
-  storageUrl String?  // public Supabase Storage CDN URL; null for legacy rows
+  storageUrl String?  // Supabase Storage path: "{userId}/{mediaId}-{name}". Null for legacy rows.
+  mediaIv    String?  // Base64 AES-GCM IV. Null = legacy unencrypted file.
   mimeType   String
   fileName   String
-  fileSize   Int      // bytes
-  caption    String?  // optional user-written caption / comment
+  fileSize   Int      // original (pre-encryption) bytes
+  caption    String?  // optional user-written caption / comment (AES-256 encrypted: "iv:ciphertext")
   createdAt  DateTime @default(now())
 
   entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)

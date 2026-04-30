@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
-import { uploadMedia } from "@/lib/storage"
+import { uploadMedia, getSignedUrls } from "@/lib/storage"
 
 // 100 MB hard cap — covers high-res photos and short video clips
 const MAX_BYTES = 100 * 1024 * 1024
@@ -9,8 +9,20 @@ const MAX_BYTES = 100 * 1024 * 1024
 const ALLOWED_MIME_PREFIXES = ["image/", "video/"]
 
 // ── POST /api/entries/[id]/media ─────────────────────────────────────────────
-// Accepts multipart/form-data with a single "file" field.
-// Uploads the file to Supabase Storage and stores the CDN URL in the DB.
+// Accepts multipart/form-data.
+//
+// Encrypted upload (new — requires MEK on the client):
+//   file     — encrypted bytes (application/octet-stream)
+//   iv       — base64 AES-GCM IV
+//   mimeType — original MIME type (e.g. "image/jpeg") for DB + UI
+//   fileName — original file name
+//   fileSize — original unencrypted file size in bytes (for display)
+//
+// Legacy unencrypted upload (fallback, no iv field):
+//   file — raw image/video bytes
+//
+// Uploads the bytes to Supabase Storage (private bucket) and stores the
+// storage path + IV in the DB.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -44,15 +56,34 @@ export async function POST(
     return NextResponse.json({ error: "No file provided" }, { status: 400 })
   }
 
-  // MIME type check
-  if (!ALLOWED_MIME_PREFIXES.some((p) => file.type.startsWith(p))) {
+  // Read optional encryption fields
+  const ivField       = formData.get("iv")
+  const mimeTypeField = formData.get("mimeType")
+  const fileNameField = formData.get("fileName")
+  const fileSizeField = formData.get("fileSize")
+
+  const isEncrypted = typeof ivField === "string" && ivField.length > 0
+
+  // Determine MIME type, file name, and original size
+  const mimeType = isEncrypted
+    ? (typeof mimeTypeField === "string" ? mimeTypeField : "application/octet-stream")
+    : file.type
+  const fileName = isEncrypted
+    ? (typeof fileNameField === "string" ? fileNameField : file.name)
+    : file.name
+  const fileSize = isEncrypted
+    ? (typeof fileSizeField === "string" ? parseInt(fileSizeField, 10) || file.size : file.size)
+    : file.size
+
+  // MIME type check (against original type, not the encrypted blob type)
+  if (!ALLOWED_MIME_PREFIXES.some((p) => mimeType.startsWith(p))) {
     return NextResponse.json(
       { error: "Only images and videos are allowed" },
       { status: 415 },
     )
   }
 
-  // Size check
+  // Size check — use the encrypted file's actual byte size
   if (file.size > MAX_BYTES) {
     return NextResponse.json(
       { error: `File exceeds ${MAX_BYTES / 1024 / 1024} MB limit` },
@@ -66,18 +97,19 @@ export async function POST(
       entryId,
       userId:     session.user.id,
       storageUrl: null,           // filled in after upload succeeds
-      mimeType:   file.type,
-      fileName:   file.name,
-      fileSize:   file.size,
+      mediaIv:    isEncrypted ? (ivField as string) : null,
+      mimeType,
+      fileName,
+      fileSize,
     },
     select: { id: true },
   })
 
-  // Upload file bytes to Supabase Storage
-  let storageUrl: string
+  // Upload bytes to Supabase Storage (private bucket)
+  let storagePath: string
   try {
     const arrayBuffer = await file.arrayBuffer()
-    storageUrl = await uploadMedia(arrayBuffer, file.type, file.name, session.user.id, media.id)
+    storagePath = await uploadMedia(arrayBuffer, fileName, session.user.id, media.id)
   } catch (err) {
     // Clean up the orphaned DB record before surfacing the error
     await prisma.entryMedia.delete({ where: { id: media.id } }).catch(() => {})
@@ -88,18 +120,18 @@ export async function POST(
     )
   }
 
-  // Persist the CDN URL
+  // Persist the storage path
   const updated = await prisma.entryMedia.update({
     where:  { id: media.id },
-    data:   { storageUrl },
+    data:   { storageUrl: storagePath },
     select: {
-      id:         true,
-      fileName:   true,
-      mimeType:   true,
-      fileSize:   true,
-      caption:    true,
-      storageUrl: true,
-      createdAt:  true,
+      id:        true,
+      fileName:  true,
+      mimeType:  true,
+      fileSize:  true,
+      caption:   true,
+      mediaIv:   true,
+      createdAt: true,
     },
   })
 
@@ -107,7 +139,9 @@ export async function POST(
 }
 
 // ── GET /api/entries/[id]/media ──────────────────────────────────────────────
-// Returns metadata list — no binary data in the response.
+// Returns metadata list with short-lived signed URLs.
+// The client fetches each signed URL, decrypts the bytes with the MEK,
+// and creates a local blob URL for display.
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -127,7 +161,7 @@ export async function GET(
     return NextResponse.json({ error: "Entry not found" }, { status: 404 })
   }
 
-  const media = await prisma.entryMedia.findMany({
+  const rows = await prisma.entryMedia.findMany({
     where: { entryId, userId: session.user.id },
     select: {
       id:         true,
@@ -136,10 +170,31 @@ export async function GET(
       fileSize:   true,
       caption:    true,
       storageUrl: true,
+      mediaIv:    true,
       createdAt:  true,
     },
     orderBy: { createdAt: "asc" },
   })
+
+  // Generate signed URLs for all items with a storageUrl
+  const pathsToSign = rows
+    .filter((r) => r.storageUrl)
+    .map((r) => r.storageUrl as string)
+
+  const signedMap = pathsToSign.length > 0
+    ? await getSignedUrls(pathsToSign).catch(() => ({} as Record<string, string>))
+    : {}
+
+  const media = rows.map((r) => ({
+    id:        r.id,
+    fileName:  r.fileName,
+    mimeType:  r.mimeType,
+    fileSize:  r.fileSize,
+    caption:   r.caption,
+    mediaIv:   r.mediaIv,
+    signedUrl: r.storageUrl ? (signedMap[r.storageUrl] ?? null) : null,
+    createdAt: r.createdAt.toISOString(),
+  }))
 
   return NextResponse.json({ media })
 }

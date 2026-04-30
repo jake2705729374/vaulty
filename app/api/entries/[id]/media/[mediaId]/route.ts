@@ -1,48 +1,57 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
-import { deleteMedia } from "@/lib/storage"
+import { deleteMedia, getSignedUrls } from "@/lib/storage"
 
 type RouteCtx = { params: Promise<{ id: string; mediaId: string }> }
 
 // ── GET /api/entries/[id]/media/[mediaId] ────────────────────────────────────
-// Redirects to the Supabase Storage CDN URL so the browser can load the media
-// directly.  This keeps API routes out of the hot path for image/video loading.
+// Returns metadata + a short-lived signed URL for fetching the encrypted bytes.
+// The client fetches the URL, decrypts with the MEK, then creates a blob URL.
+//
+// Legacy unencrypted files (mediaIv = null) can be displayed directly from the
+// signed URL without any decryption step.
 export async function GET(_req: NextRequest, { params }: RouteCtx) {
   const session = await auth()
   if (!session?.user?.id) {
-    return new NextResponse("Unauthorized", { status: 401 })
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   const { id: entryId, mediaId } = await params
 
   const media = await prisma.entryMedia.findFirst({
     where:  { id: mediaId, entryId, userId: session.user.id },
-    select: { storageUrl: true, mimeType: true, fileName: true },
+    select: { storageUrl: true, mimeType: true, fileName: true, mediaIv: true, fileSize: true, caption: true, createdAt: true },
   })
 
   if (!media) {
-    return new NextResponse("Not found", { status: 404 })
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
   if (!media.storageUrl) {
-    // Legacy row from before the object-storage migration — no bytes to serve
-    return new NextResponse("Media not available", { status: 410 })
+    return NextResponse.json({ error: "Media not available" }, { status: 410 })
   }
 
-  // Redirect the browser to the CDN URL — cached by the browser for future loads
-  return NextResponse.redirect(media.storageUrl, {
-    status: 302,
-    headers: {
-      // The CDN URL itself is cache-controlled; this redirect need not be cached long
-      "Cache-Control": "private, max-age=60",
-    },
+  // Generate a fresh signed URL
+  const signedMap = await getSignedUrls([media.storageUrl]).catch(() => ({} as Record<string, string>))
+  const signedUrl = signedMap[media.storageUrl] ?? null
+
+  return NextResponse.json({
+    id:        mediaId,
+    fileName:  media.fileName,
+    mimeType:  media.mimeType,
+    fileSize:  media.fileSize,
+    caption:   media.caption,
+    mediaIv:   media.mediaIv,
+    signedUrl,
+    createdAt: media.createdAt.toISOString(),
   })
 }
 
 // ── PATCH /api/entries/[id]/media/[mediaId] ──────────────────────────────────
 // Updates the caption on a media item.
 // Body: { caption: string | null }
+// Captions are AES-256 encrypted client-side (stored as "iv:ciphertext").
 export async function PATCH(req: NextRequest, { params }: RouteCtx) {
   const session = await auth()
   if (!session?.user?.id) {
@@ -61,31 +70,21 @@ export async function PATCH(req: NextRequest, { params }: RouteCtx) {
   }
 
   const body = await req.json().catch(() => ({}))
-  // Allow setting caption to a string or clearing it with null/empty
   const caption: string | null =
     typeof body.caption === "string" && body.caption.trim().length > 0
       ? body.caption.trim()
       : null
 
-  const updated = await prisma.entryMedia.update({
-    where:  { id: mediaId },
-    data:   { caption },
-    select: {
-      id:         true,
-      fileName:   true,
-      mimeType:   true,
-      fileSize:   true,
-      caption:    true,
-      storageUrl: true,
-      createdAt:  true,
-    },
+  await prisma.entryMedia.update({
+    where: { id: mediaId },
+    data:  { caption },
   })
 
-  return NextResponse.json(updated)
+  return new NextResponse(null, { status: 204 })
 }
 
 // ── DELETE /api/entries/[id]/media/[mediaId] ─────────────────────────────────
-// Removes the file from Supabase Storage, then deletes the DB record.
+// Removes the encrypted file from Supabase Storage, then deletes the DB record.
 export async function DELETE(_req: NextRequest, { params }: RouteCtx) {
   const session = await auth()
   if (!session?.user?.id) {
@@ -103,8 +102,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteCtx) {
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
-  // Delete the object from Supabase Storage first (non-fatal if it fails —
-  // the DB record is still removed so the UI stays consistent)
+  // Delete the object from Supabase Storage first (non-fatal if it fails)
   if (media.storageUrl) {
     try {
       await deleteMedia(media.storageUrl)
