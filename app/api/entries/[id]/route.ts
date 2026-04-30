@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
+import { EntryBodySchema, MAX_ENTRY_BODY_BYTES, parseBody } from "@/lib/validation"
 
 export async function GET(
   _req: NextRequest,
@@ -55,10 +56,10 @@ export async function PUT(
   const existing = await prisma.entry.findFirst({ where: { id, userId: session.user.id } })
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  const { title, ciphertext, iv, salt = null, mood } = await req.json()
-  if (!ciphertext || !iv) {
-    return NextResponse.json({ error: "Missing encrypted content" }, { status: 400 })
-  }
+  const parsed = parseBody(await req.text(), EntryBodySchema, MAX_ENTRY_BODY_BYTES)
+  if (parsed.error) return parsed.error
+
+  const { title, ciphertext, iv, salt = null, mood } = parsed.data
 
   const entry = await prisma.entry.update({
     where: { id },
@@ -70,10 +71,10 @@ export async function PUT(
     },
   })
 
-  // Upsert mood log
+  // Upsert mood log — mood is validated as a proper enum value by Zod
   if (mood) {
     await prisma.moodLog.upsert({
-      where: { entryId: id },
+      where:  { entryId: id },
       create: { userId: session.user.id, entryId: id, mood },
       update: { mood },
     })

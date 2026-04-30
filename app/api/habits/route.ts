@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
+import { HabitBodySchema, MAX_BODY_BYTES, parseBody } from "@/lib/validation"
 
 const MAX_HABITS = 10
 
@@ -38,17 +39,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Maximum of ${MAX_HABITS} habits allowed` }, { status: 422 })
   }
 
-  const body = await req.json().catch(() => ({}))
-  const name = typeof body.name === "string" ? body.name.trim() : ""
-  if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 })
+  const parsed = parseBody(await req.text(), HabitBodySchema, MAX_BODY_BYTES)
+  if (parsed.error) return parsed.error
 
   const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#06b6d4","#84cc16","#f97316"]
-  const color = typeof body.color === "string" ? body.color : COLORS[count % COLORS.length]
-  const description = typeof body.description === "string" && body.description.trim()
-    ? body.description.trim() : null
+  const { name, description = null, color = COLORS[count % COLORS.length] } = parsed.data
 
   const habit = await prisma.habit.create({
-    data: { userId: session.user.id, name, description, color, order: count },
+    data: { userId: session.user.id, name, description: description ?? null, color, order: count },
     include: { logs: { select: { id: true, date: true } } },
   })
 

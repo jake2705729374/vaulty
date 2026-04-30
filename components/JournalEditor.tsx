@@ -543,7 +543,10 @@ export default function JournalEditor({
     },
     editorProps: {
       attributes: {
-        class: "journal-prose min-h-[52vh] focus:outline-none px-6 py-5",
+        class:            "journal-prose min-h-[52vh] focus:outline-none px-6 py-5",
+        role:             "textbox",
+        "aria-label":     "Journal entry body",
+        "aria-multiline": "true",
       },
     },
   })
@@ -1024,10 +1027,16 @@ export default function JournalEditor({
     >
     {/* ── Mobile tab switcher ─────────────────────────────────────────── */}
     <div
+      role="tablist"
+      aria-label="Editor sections"
       className="md:hidden flex items-center border-b flex-shrink-0"
       style={{ backgroundColor: "var(--color-surface)", borderColor: "var(--color-border)" }}
     >
       <button
+        role="tab"
+        aria-selected={mobileTab === "write"}
+        aria-controls="mobile-panel-write"
+        id="mobile-tab-write"
         onClick={() => setMobileTab("write")}
         className="flex-1 py-2.5 text-sm font-inter font-medium transition-colors"
         style={{
@@ -1038,6 +1047,10 @@ export default function JournalEditor({
         Write
       </button>
       <button
+        role="tab"
+        aria-selected={mobileTab === "habits"}
+        aria-controls="mobile-panel-habits"
+        id="mobile-tab-habits"
         onClick={() => setMobileTab("habits")}
         className="flex-1 py-2.5 text-sm font-inter font-medium transition-colors flex items-center justify-center gap-1.5"
         style={{
@@ -1050,6 +1063,10 @@ export default function JournalEditor({
       </button>
       {onToggleCoach && (
         <button
+          role="tab"
+          aria-selected={mobileTab === "coach"}
+          aria-controls="mobile-panel-coach"
+          id="mobile-tab-coach"
           onClick={() => setMobileTab("coach")}
           className="flex-1 py-2.5 text-sm font-inter font-medium transition-colors flex items-center justify-center gap-1.5"
           style={{
@@ -1065,14 +1082,14 @@ export default function JournalEditor({
 
     {/* ── Mobile habits panel (full-screen, hides editor) ─────────────── */}
     {mobileTab === "habits" && (
-      <div className="md:hidden flex-1 flex flex-col overflow-y-auto" style={{ minHeight: 0 }}>
+      <div role="tabpanel" id="mobile-panel-habits" aria-labelledby="mobile-tab-habits" className="md:hidden flex-1 flex flex-col overflow-y-auto" style={{ minHeight: 0 }}>
         <HabitsPanel />
       </div>
     )}
 
     {/* ── Mobile coach panel (full-screen, hides editor) ──────────────── */}
     {mobileTab === "coach" && onToggleCoach && (
-      <div className="md:hidden flex-1 flex flex-col" style={{ minHeight: 0 }}>
+      <div role="tabpanel" id="mobile-panel-coach" aria-labelledby="mobile-tab-coach" className="md:hidden flex-1 flex flex-col" style={{ minHeight: 0 }}>
         <CoachPanel
           entryContent={liveEditorText}
           recentEntries={recentEntries}
@@ -1331,6 +1348,7 @@ export default function JournalEditor({
           accept="image/*,video/*"
           multiple
           className="hidden"
+          aria-label="Attach photos or videos"
           onChange={handleFileSelect}
         />
       </div>

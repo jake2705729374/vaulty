@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
+import { EntryBodySchema, MAX_ENTRY_BODY_BYTES, parseBody } from "@/lib/validation"
 
 export async function GET() {
   const session = await auth()
@@ -31,15 +32,15 @@ export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const { title, ciphertext, iv, salt = null, mood } = await req.json()
-  if (!ciphertext || !iv) {
-    return NextResponse.json({ error: "Missing encrypted content" }, { status: 400 })
-  }
+  const parsed = parseBody(await req.text(), EntryBodySchema, MAX_ENTRY_BODY_BYTES)
+  if (parsed.error) return parsed.error
+
+  const { title, ciphertext, iv, salt = null, mood } = parsed.data
 
   const entry = await prisma.entry.create({
     data: {
       userId: session.user.id,
-      title: title ?? "Untitled",
+      title:  title ?? "Untitled",
       ciphertext,
       iv,
       salt,   // null for MEK-encrypted entries, base64 string for legacy

@@ -27,14 +27,23 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Vaultly — Write Freely. Think Clearly. Grow Daily.",
+  title:       "Vaultly — Write Freely. Think Clearly. Grow Daily.",
   description: "Vaultly is your private, AI-powered journal. AES-256 encrypted, beautifully designed, and always just between you and your thoughts.",
+  manifest:    "/manifest.webmanifest",
+  // PWA / home-screen settings for iOS (Safari ignores the W3C manifest for most of these)
+  appleWebApp: {
+    capable:         true,
+    title:           "Vaultly",
+    statusBarStyle:  "black-translucent",
+  },
 };
 
 export const viewport = {
-  width: "device-width",
+  width:        "device-width",
   initialScale: 1,
   maximumScale: 1,
+  // Tint the browser chrome / status bar to match the app's dark theme
+  themeColor:   "#7c6ef2",
 };
 
 // Minified blocking script — runs before React hydrates to prevent theme flash.

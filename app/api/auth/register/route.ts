@@ -17,11 +17,19 @@ export async function POST(req: NextRequest) {
   const limited = await rateLimit(req, "register")
   if (limited) return limited
 
-  const { email: rawEmail, password } = await req.json()
-  const email = rawEmail?.trim().toLowerCase()
+  let rawBody: { email?: string; password?: string }
+  try { rawBody = await req.json() } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
+  }
+
+  const email = typeof rawBody.email === "string" ? rawBody.email.trim().toLowerCase() : ""
+  const password = typeof rawBody.password === "string" ? rawBody.password : ""
 
   if (!email || !password) {
-    return NextResponse.json({ error: "Invalid input" }, { status: 400 })
+    return NextResponse.json({ error: "Email and password are required" }, { status: 400 })
+  }
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: "Invalid email address" }, { status: 400 })
   }
   const pwError = validatePasswordServer(password)
   if (pwError) return NextResponse.json({ error: pwError }, { status: 400 })
