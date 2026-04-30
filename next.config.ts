@@ -149,5 +149,7 @@ export default withSentryConfig(nextConfig, {
   },
 
   // Don't auto-create Vercel Cron Monitors (we don't use them)
-  automaticVercelMonitors: false,
+  webpack: {
+    automaticVercelMonitors: false,
+  },
 })
