@@ -10,7 +10,8 @@ import AuthNav from "@/components/AuthNav"
 function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const [justVerified, setJustVerified] = useState(false)
+  // Derive justVerified from the URL param at first render — no effect needed
+  const [justVerified] = useState(() => searchParams.get("verified") === "1")
   const [email, setEmail]           = useState("")
   const [password, setPassword]     = useState("")
   const [showPw, setShowPw]         = useState(false)
@@ -18,10 +19,6 @@ function LoginForm() {
   const [unverified, setUnverified] = useState(false)
   const [loading, setLoading]       = useState(false)
   const [resending, setResending]   = useState(false)
-
-  useEffect(() => {
-    if (searchParams.get("verified") === "1") setJustVerified(true)
-  }, [searchParams])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

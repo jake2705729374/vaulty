@@ -928,7 +928,7 @@ export default function SettingsPage() {
                 <div className="mt-5">
                   <p className="text-xs font-inter font-semibold text-ink-muted mb-1.5">About you</p>
                   <p className="text-xs font-inter text-ink-faint mb-2">
-                    Anything your coach should know — your values, background, what you're working towards.
+                    Anything your coach should know — your values, background, what you&apos;re working towards.
                   </p>
                   <textarea
                     value={userBio}

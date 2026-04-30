@@ -25,6 +25,7 @@ export default function MoodCalendar({ initialYear, initialMonth }: MoodCalendar
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: reset loading when month/year changes
     setLoading(true)
     // Send the client's UTC offset so the API can bucket entries into local dates.
     // getTimezoneOffset() returns (UTC − local) in minutes; negate it to get the

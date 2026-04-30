@@ -323,7 +323,7 @@ export default function LockScreen({ onUnlock }: LockScreenProps) {
                   Send reset code
                 </h2>
                 <p className="text-sm font-inter text-ink-muted">
-                  We'll email a 6-digit code to your address.
+                  We&apos;ll email a 6-digit code to your address.
                 </p>
               </div>
 
@@ -434,7 +434,7 @@ export default function LockScreen({ onUnlock }: LockScreenProps) {
               </form>
 
               <p className="text-xs font-inter text-center mt-5" style={{ color: "var(--color-ink-faint)" }}>
-                Didn't receive a code?{" "}
+                Didn&apos;t receive a code?{" "}
                 <button
                   type="button"
                   onClick={() => setStep("send")}

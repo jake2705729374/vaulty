@@ -37,7 +37,7 @@ export async function POST(_req: NextRequest) {
     const rate = Math.round((completedDays / totalDays) * 100)
     // Compute current streak
     let streak = 0
-    let d = new Date()
+    const d = new Date()
     while (true) {
       const ds = d.toISOString().slice(0, 10)
       if (h.logs.some((l) => l.date === ds)) { streak++; d.setDate(d.getDate() - 1) }

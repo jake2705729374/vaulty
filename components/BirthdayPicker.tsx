@@ -68,6 +68,7 @@ export function BirthdayPicker({
   const triggerRef  = useRef<HTMLButtonElement>(null)
   const yearGridRef = useRef<HTMLDivElement>(null)
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: standard SSR hydration guard
   useEffect(() => { setMounted(true) }, [])
 
   // ── Design tokens ─────────────────────────────────────────────────────────

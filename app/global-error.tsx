@@ -168,6 +168,8 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
             <button className="btn-primary" onClick={reset}>
               Try again
             </button>
+            {/* global-error renders outside Next.js context — <Link> is unavailable */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a className="btn-secondary" href="/">
               Return home
             </a>

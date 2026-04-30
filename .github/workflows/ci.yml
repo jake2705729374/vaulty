@@ -1,0 +1,98 @@
+name: CI / Deploy
+
+# ── Triggers ──────────────────────────────────────────────────────────────────
+#
+#  • Every push to main   → run the check job, then deploy to production
+#  • Every PR into main   → run the check job only (blocks merge if it fails)
+#
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel any in-progress run for the same ref so a fast follow-up push doesn't
+# queue behind a stale build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── Job 1: Lint + Type-check + Build ────────────────────────────────────────
+  #
+  # Runs on every push and every PR.  A failed check blocks the deploy job on
+  # main, and (once branch protection is enabled) blocks PR merges.
+  #
+  check:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # next lint — runs ESLint with the Next.js config across app/, components/,
+      # lib/, etc.  Fails the job on any error (warnings are allowed).
+      - name: Lint
+        run: npm run lint
+
+      # next build runs TypeScript type-checking AND compiles the full app.
+      # No real database connection happens at build time — dynamic routes are
+      # compiled, not executed.  We pass minimal placeholder env vars so that
+      # any module that reads process.env at import time doesn't throw.
+      - name: Build (TypeScript + compile)
+        run: npm run build
+        env:
+          # Not real credentials — used only so modules compile without throwing
+          # on missing env vars.  Vercel uses the real secrets when it builds.
+          DATABASE_URL:      "postgresql://ci:ci@localhost:5432/ci"
+          NEXTAUTH_SECRET:   "ci-build-placeholder-not-a-real-secret"
+          NEXTAUTH_URL:      "http://localhost:3000"
+          AUTH_SECRET:       "ci-build-placeholder-not-a-real-secret"
+
+          # Sentry: empty DSN means no events fire; source-map upload is skipped
+          # automatically when SENTRY_AUTH_TOKEN is absent.
+          NEXT_PUBLIC_SENTRY_DSN: ""
+
+  # ── Job 2: Deploy to Vercel Production ──────────────────────────────────────
+  #
+  # Runs ONLY on push to main (not on PRs) and ONLY after the check job passes.
+  # Vercel re-builds the project server-side with all real env vars already
+  # configured in the Vercel project settings.
+  #
+  # Required GitHub secret:
+  #   VERCEL_TOKEN — create at vercel.com/account/tokens (Account → Tokens)
+  #                  then add in GitHub → repo Settings → Secrets → Actions
+  #
+  deploy:
+    name: Deploy → Production
+    needs: check
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      # vercel deploy --prod tells Vercel to build + deploy to the production
+      # URL.  The real env vars (DATABASE_URL, ANTHROPIC_API_KEY, etc.) are
+      # already stored in the Vercel project — this step just triggers the build.
+      - name: Deploy to Vercel (production)
+        run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          # Not secrets — these are already in .vercel/project.json (committed).
+          VERCEL_ORG_ID:     team_QC3QTdaMrXm1x7cm1Cxg3Zye
+          VERCEL_PROJECT_ID: prj_k3fBZ773w6zxP8N0AWcb2KoQ1Ceg
