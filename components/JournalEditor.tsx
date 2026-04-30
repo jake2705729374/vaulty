@@ -475,31 +475,51 @@ export default function JournalEditor({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Decrypt encrypted media files when MEK becomes available (or when new items are added).
-  // For each item that has mediaIv (encrypted) and no blobUrl (not a fresh upload):
-  //   1. Fetch ciphertext from the signed URL
-  //   2. Decrypt with the MEK
-  //   3. Create a blob URL from the decrypted bytes
-  //   4. Store in decryptedUrls so the thumbnail/lightbox can render it
+  // Fetch and (if encrypted) decrypt media files so they render as blob URLs.
+  //
+  // Bytes are fetched through our own proxy endpoint rather than Supabase signed
+  // URLs — this way authentication is handled by NextAuth (same-origin, no CORS,
+  // no signed-URL expiry issues).  The server fetches from Supabase with the
+  // service-role key and returns the raw ciphertext; we decrypt here with the MEK.
+  //
+  // Handles both cases:
+  //   • Encrypted items  (mediaIv set)  — fetch → decrypt with MEK → blob URL
+  //   • Legacy items     (mediaIv null) — fetch → blob URL directly (no decrypt)
   useEffect(() => {
-    if (!mek) return
-    const toDecrypt = savedMedia.filter((item) => item.mediaIv && item.signedUrl && !item.blobUrl)
-    if (toDecrypt.length === 0) return
+    if (!entryId) return
+
+    // Items that still need to be fetched (no blobUrl yet and not already decrypted)
+    const toFetch = savedMedia.filter(
+      (item) => !item.blobUrl && !decryptedUrlsRef.current[item.id]
+    )
+    // Encrypted items require the MEK — if it's not available yet, wait.
+    const hasEncrypted = toFetch.some((item) => item.mediaIv)
+    if (hasEncrypted && !mek) return
+    if (toFetch.length === 0) return
 
     let cancelled = false
     ;(async () => {
       const entries: Array<[string, string]> = []
-      for (const item of toDecrypt) {
-        if (!item.signedUrl || !item.mediaIv) continue
+      for (const item of toFetch) {
+        if (item.mediaIv && !mek) continue  // encrypted but MEK not ready
         try {
-          const res = await fetch(item.signedUrl)
-          if (!res.ok) continue
-          const encrypted = await res.arrayBuffer()
-          const decrypted = await decryptMedia(encrypted, item.mediaIv, mek)
-          const blobUrl   = URL.createObjectURL(new Blob([decrypted], { type: item.mimeType }))
+          const res = await fetch(
+            `/api/entries/${entryId}/media/${item.id}/download`
+          )
+          if (!res.ok) {
+            console.error(`[media] download failed for ${item.id}: ${res.status}`)
+            continue
+          }
+          const bytes = await res.arrayBuffer()
+          const finalBytes = item.mediaIv && mek
+            ? await decryptMedia(bytes, item.mediaIv, mek)
+            : bytes  // legacy unencrypted — use as-is
+          const blobUrl = URL.createObjectURL(
+            new Blob([finalBytes], { type: item.mimeType })
+          )
           entries.push([item.id, blobUrl])
-        } catch {
-          // Decryption failure — skip item; it will show as a broken placeholder
+        } catch (err) {
+          console.error(`[media] fetch/decrypt error for ${item.id}:`, err)
         }
       }
       if (!cancelled && entries.length > 0) {
@@ -508,9 +528,9 @@ export default function JournalEditor({
     })()
 
     return () => { cancelled = true }
-  // Re-run when mek becomes available OR when new encrypted items appear (length change).
+  // Re-run when mek becomes available OR when saved items count changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mek, savedMedia.length])
+  }, [mek, entryId, savedMedia.length])
 
   // Auto-resize caption textarea whenever captionText changes (user typing OR
   // programmatic value changes when navigating between images).
@@ -1105,14 +1125,16 @@ export default function JournalEditor({
   }
 
   // Resolve the best available display URL for a media item:
-  //   1. blobUrl  — set immediately after upload, no network round-trip
-  //   2. decryptedUrls[id] — decrypted blob URL (populated by the decryption useEffect)
-  //   3. signedUrl — for legacy UNENCRYPTED files (mediaIv is null); used as-is for <img>/<video>
-  //   4. ""  — encrypted file still being decrypted; component renders an empty placeholder
+  //   1. blobUrl         — set immediately after upload (fresh session, no refetch needed)
+  //   2. decryptedUrls[id] — fetched via proxy + decrypted (set by the useEffect above)
+  //   3. ""              — still loading; component renders an empty placeholder
+  //
+  // Note: we no longer fall back to signedUrl directly — all media (including legacy
+  // unencrypted files) is now served through the /download proxy so the private bucket
+  // is always respected.
   function getMediaSrc(item: MediaMeta): string {
-    if (item.blobUrl)                       return item.blobUrl
-    if (decryptedUrls[item.id])             return decryptedUrls[item.id]
-    if (!item.mediaIv && item.signedUrl)    return item.signedUrl
+    if (item.blobUrl)           return item.blobUrl
+    if (decryptedUrls[item.id]) return decryptedUrls[item.id]
     return ""
   }
 

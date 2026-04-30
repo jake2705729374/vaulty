@@ -148,6 +148,33 @@ export async function getSignedUrls(
 }
 
 /**
+ * Download a media object from Supabase Storage.
+ *
+ * Fetches the raw (encrypted) bytes directly using the service role key.
+ * Used by the server-side proxy download endpoint so the client never needs
+ * a signed URL — authentication is handled by NextAuth on our own API.
+ *
+ * Accepts either a bare storage path or a legacy full CDN URL.
+ */
+export async function downloadMedia(storageUrl: string): Promise<ArrayBuffer> {
+  const path    = extractStoragePath(storageUrl)
+  const fetchUrl = `${baseUrl()}/storage/v1/object/${BUCKET}/${path}`
+
+  const res = await fetch(fetchUrl, {
+    headers: {
+      "Authorization": `Bearer ${serviceKey()}`,
+    },
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new Error(`Supabase Storage download failed (${res.status}): ${body}`)
+  }
+
+  return res.arrayBuffer()
+}
+
+/**
  * Delete a media object from Supabase Storage.
  *
  * Accepts either a bare storage path or a legacy full CDN URL.
