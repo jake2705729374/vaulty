@@ -14,6 +14,7 @@ import {
 } from "@/lib/crypto"
 import PageTransition from "@/components/PageTransition"
 import { type CoachContext } from "@/components/CoachPanel"
+import { track } from "@/lib/analytics"
 
 type View = "list" | "new"
 
@@ -416,7 +417,7 @@ export default function JournalPage() {
             coachContext={coachContext}
             recentEntries={coachContextEnabled ? recentEntries : undefined}
             showCoach={showCoach}
-            onToggleCoach={() => setShowCoach((s) => !s)}
+            onToggleCoach={() => { const next = !showCoach; setShowCoach(next); if (next) track("coach_panel_opened", { device: "desktop" }) }}
           />
         </div>
       )}

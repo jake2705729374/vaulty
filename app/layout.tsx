@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Sora, Inter } from "next/font/google";
+import { Analytics }     from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import SessionProvider from "@/components/SessionProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
@@ -70,6 +72,10 @@ export default function RootLayout({
             {children}
           </ThemeProvider>
         </SessionProvider>
+        {/* Vercel Analytics — page views + custom events via track() */}
+        <Analytics />
+        {/* Vercel Speed Insights — Core Web Vitals (LCP, FID, CLS) */}
+        <SpeedInsights />
       </body>
     </html>
   );

@@ -7,6 +7,7 @@ import Link from "next/link"
 import CoachPanel, { type CoachContext } from "@/components/CoachPanel"
 import HabitsPanel from "@/components/HabitsPanel"
 import { encryptWithMek, decryptWithMek } from "@/lib/crypto"
+import { track } from "@/lib/analytics"
 
 // ── Dictation mime-type helper ────────────────────────────────────────────
 function getDictationMimeType(): string {
@@ -323,6 +324,7 @@ export default function JournalEditor({
   // Word / char count
   const [wordCount, setWordCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
+  const wordCountRef = useRef(0)   // mirror for use inside async callbacks
 
   // Media attachments
   type UploadingItem = { tempId: string; fileName: string; mimeType: string; preview: string }
@@ -506,6 +508,10 @@ export default function JournalEditor({
         await fn({ title: titleRef.current || "Untitled", content, mood: moodRef.current })
         setDbStatus("saved")
         setLastSavedTime(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }))
+        track("entry_saved", {
+          type:       entryId ? "existing" : "new",
+          word_count: wordCountRef.current,
+        })
       } catch {
         setDbStatus("error")
       } finally {
@@ -521,7 +527,9 @@ export default function JournalEditor({
     immediatelyRender: false,
     onUpdate: ({ editor }) => {
       const text = editor.getText()
-      setWordCount(text.trim() ? text.trim().split(/\s+/).length : 0)
+      const wc = text.trim() ? text.trim().split(/\s+/).length : 0
+      setWordCount(wc)
+      wordCountRef.current = wc
       setCharCount(text.length)
 
       // ── Debounced live text for coach panel (500 ms) ──
@@ -853,6 +861,9 @@ export default function JournalEditor({
           // displays instantly without a round-trip back to the server.
           // The blob URL is revoked when the item is deleted or the component unmounts.
           setSavedMedia((p) => [...p, { ...data, blobUrl: preview }])
+          track("media_uploaded", {
+            media_type: compressed.type.startsWith("video/") ? "video" : "image",
+          })
         } else {
           // Read the actual error reason — only parse as JSON when Content-Type says so.
           // If the 404 came from Next.js routing (HTML body) this avoids a parse error
@@ -1067,7 +1078,7 @@ export default function JournalEditor({
           aria-selected={mobileTab === "coach"}
           aria-controls="mobile-panel-coach"
           id="mobile-tab-coach"
-          onClick={() => setMobileTab("coach")}
+          onClick={() => { setMobileTab("coach"); if (mobileTab !== "coach") track("coach_panel_opened", { device: "mobile" }) }}
           className="flex-1 py-2.5 text-sm font-inter font-medium transition-colors flex items-center justify-center gap-1.5"
           style={{
             color: mobileTab === "coach" ? "var(--color-accent)" : "var(--color-ink-muted)",

@@ -7,6 +7,7 @@ import Link from "next/link"
 import { motion, AnimatePresence } from "framer-motion"
 import { QUOTE_CATEGORIES, type QuoteCategory } from "@/lib/quotes"
 import { BirthdayPicker } from "@/components/BirthdayPicker"
+import { track } from "@/lib/analytics"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 type Goal = "mental_clarity" | "emotional_wellbeing" | "personal_growth" | "creativity" | "gratitude" | "habit_tracking"
@@ -223,7 +224,11 @@ export default function OnboardingPage() {
 
   function goNext() {
     setDir(1)
-    setStep((s) => Math.min(s + 1, TOTAL_STEPS))
+    setStep((s) => {
+      const next = Math.min(s + 1, TOTAL_STEPS)
+      track("onboarding_step_viewed", { step: next })
+      return next
+    })
   }
 
   function goBack() {
@@ -327,6 +332,11 @@ export default function OnboardingPage() {
       }).catch(() => {/* silently skip failures */})
     }
 
+    track("onboarding_completed", {
+      goals_count:       goals.length,
+      has_coach_profile: people.length > 0 || !!lifePhase,
+      habits_count:      onboardingHabits.length,
+    })
     router.push("/dashboard")
   }
 

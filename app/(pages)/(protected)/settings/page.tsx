@@ -11,6 +11,7 @@ import PasswordStrengthMeter from "@/components/PasswordStrengthMeter"
 import { QUOTE_CATEGORIES } from "@/lib/quotes"
 import { unlockMek, rewrapMek, type KeyBundle } from "@/lib/crypto"
 import { getPasswordStrength } from "@/lib/password-strength"
+import { track } from "@/lib/analytics"
 
 type ColorTheme = "PARCHMENT" | "SLATE" | "ROSE" | "FOREST" | "MIDNIGHT" | "VAULT" | "CUSTOM"
 type DarkMode = "SYSTEM" | "LIGHT" | "DARK"
@@ -289,6 +290,7 @@ export default function SettingsPage() {
   async function handleThemeChange(theme: ColorTheme) {
     await setColorTheme(theme)
     showSaved()
+    track("settings_theme_changed", { theme })
   }
 
   async function handleDarkModeChange(mode: DarkMode) {
@@ -309,9 +311,11 @@ export default function SettingsPage() {
   }
 
   function toggleGoal(id: string) {
-    const next = goals.includes(id) ? goals.filter((g) => g !== id) : [...goals, id]
+    const enabled = !goals.includes(id)
+    const next = enabled ? [...goals, id] : goals.filter((g) => g !== id)
     setGoals(next)
     schedulePatch({ journalingGoals: JSON.stringify(next) })
+    track("settings_goal_toggled", { goal: id, enabled })
   }
 
   function toggleQuoteCat(id: string) {
@@ -378,6 +382,7 @@ export default function SettingsPage() {
       // Turning OFF — save immediately
       setCoachContextEnabled(false)
       schedulePatch({ coachContextEnabled: false })
+      track("settings_ai_entries_toggled", { enabled: false })
     } else {
       // Turning ON — show disclosure modal first
       setShowPrivacyModal(true)
@@ -388,6 +393,7 @@ export default function SettingsPage() {
     setShowPrivacyModal(false)
     setCoachContextEnabled(true)
     schedulePatch({ coachContextEnabled: true })
+    track("settings_ai_entries_toggled", { enabled: true })
   }
 
   async function handlePasswordChange(e: React.FormEvent) {
@@ -966,6 +972,7 @@ export default function SettingsPage() {
                           onClick={() => {
                             setCoachStyle(style)
                             schedulePatch({ coachStyle: style })
+                            track("settings_coach_style_changed", { style })
                           }}
                           className="px-3 py-1.5 rounded-full text-xs font-inter font-medium transition-all"
                           style={{

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import Link from "next/link"
+import { track } from "@/lib/analytics"
 
 // ── Types ────────────────────────────────────────────────────────────────
 export interface CoachPerson {
@@ -242,6 +243,12 @@ export default function CoachPanel({
     text = text.trim()
     if (!text || loading) return
 
+    track("coach_message_sent", {
+      source:              "panel",
+      has_entry_context:   !!entryContent && entryContent.length > 0,
+      has_recent_entries:  !!recentEntries && recentEntries.length > 0,
+    })
+
     const userMsg: Message = { role: "user", content: text }
     const updatedHistory   = [...messages, userMsg]
     setMessages(updatedHistory)
@@ -374,6 +381,7 @@ export default function CoachPanel({
   function handleAddToEntry(content: string, idx: number) {
     onInsertToEntry(stripMarkdown(content))
     setAddedIdx((prev) => new Set(prev).add(idx))
+    track("coach_insert_to_entry", {})
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
