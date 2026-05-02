@@ -35,7 +35,7 @@ export type AnalyticsEvent =
   /** User opens the coach split-pane on desktop or the Coach tab on mobile. */
   | { name: "coach_panel_opened";       props: { device: "desktop" | "mobile" } }
   /** User sends a message to the coach inside the editor. */
-  | { name: "coach_message_sent";       props: { source: "panel"; has_entry_context: boolean; has_recent_entries: boolean } }
+  | { name: "coach_message_sent";       props: { source: "panel"; mode: "coach" | "refine"; has_entry_context: boolean; has_recent_entries: boolean } }
   /** User clicks "Add to entry" under a coach response. */
   | { name: "coach_insert_to_entry";    props: Record<string, never> }
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { anthropic } from "@/lib/ai/claude"
-import { COACH_BASE_PROMPT } from "@/lib/ai/prompts"
+import { COACH_BASE_PROMPT, REFINE_ENTRY_PROMPT } from "@/lib/ai/prompts"
 
 interface CoachPerson {
   name:         string
@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
     entryContent   = "",
     recentEntries  = [],
     elevated       = false,
+    mode           = null,
   }: {
     message:       string
     history:       HistoryMessage[]
@@ -197,10 +198,64 @@ export async function POST(req: NextRequest) {
     entryContent:  string
     recentEntries: string[]
     elevated:      boolean
+    mode:          "refine" | null
   } = await req.json()
 
   if (!message) {
     return NextResponse.json({ error: "Missing message" }, { status: 400 })
+  }
+
+  // ── Refine mode: transform raw notes into polished journal prose ────────────
+  // Uses a dedicated prompt + entry content only. No coach context, no DB queries.
+  if (mode === "refine") {
+    const systemBlocks: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] = [
+      {
+        type:          "text",
+        text:          REFINE_ENTRY_PROMPT,
+        cache_control: { type: "ephemeral" },  // stable rules — cache this
+      },
+    ]
+
+    if (entryContent.trim()) {
+      systemBlocks.push({
+        type: "text",
+        text: `The user's current journal notes to transform:\n\n${entryContent.trim()}`,
+        // No cache_control — changes every keystroke
+      })
+    }
+
+    const refineStream = anthropic.messages.stream({
+      model:      "claude-haiku-4-5-20251001",
+      max_tokens: 2048,   // entries can run longer than coach replies
+      system:     systemBlocks,
+      messages:   [
+        ...history,
+        { role: "user" as const, content: message },
+      ],
+    })
+
+    const enc = new TextEncoder()
+    const refineReadable = new ReadableStream({
+      async start(controller) {
+        try {
+          refineStream.on("text", (text) => controller.enqueue(enc.encode(text)))
+          await refineStream.finalMessage()
+          controller.close()
+        } catch (err) {
+          const msg =
+            err instanceof Error && err.message.toLowerCase().includes("credit")
+              ? "[AI_ERROR: Your Anthropic account has insufficient credits. Please top up at console.anthropic.com/billing.]"
+              : "[AI_ERROR: The AI service is temporarily unavailable. Please try again.]"
+          controller.enqueue(enc.encode(msg))
+          controller.close()
+        }
+      },
+      cancel() { refineStream.abort() },
+    })
+
+    return new Response(refineReadable, {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" },
+    })
   }
 
   // Load server-side context: memories + session summaries + prefs (bio, style) + habits

@@ -142,11 +142,13 @@ export default function CoachPanel({
   onClose,
   onInsertToEntry,
 }: CoachPanelProps) {
-  const [messages,    setMessages]   = useState<Message[]>([])
-  const [input,       setInput]      = useState("")
-  const [loading,     setLoading]    = useState(false)
-  const [addedIdx,    setAddedIdx]   = useState<Set<number>>(new Set())
+  const [messages,      setMessages]      = useState<Message[]>([])
+  const [input,         setInput]         = useState("")
+  const [loading,       setLoading]       = useState(false)
+  const [addedIdx,      setAddedIdx]      = useState<Set<number>>(new Set())
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  // When true, every message in this session uses the "refine" mode (entry rewriting)
+  const [isRefineMode,  setIsRefineMode]  = useState(false)
 
   const bottomRef   = useRef<HTMLDivElement>(null)
   const inputRef    = useRef<HTMLTextAreaElement>(null)
@@ -239,12 +241,18 @@ export default function CoachPanel({
   }
 
   // ── Send message ─────────────────────────────────────────────────────
-  async function handleSend(text: string) {
+  async function handleSend(text: string, opts?: { refine?: boolean }) {
     text = text.trim()
     if (!text || loading) return
 
+    // If this is the first refine call, lock the session into refine mode so that
+    // every follow-up message ("shorter", "more reflective") also uses the rewrite prompt.
+    const refine = opts?.refine || isRefineMode
+    if (opts?.refine) setIsRefineMode(true)
+
     track("coach_message_sent", {
       source:              "panel",
+      mode:                refine ? "refine" : "coach",
       has_entry_context:   !!entryContent && entryContent.length > 0,
       has_recent_entries:  !!recentEntries && recentEntries.length > 0,
     })
@@ -260,63 +268,66 @@ export default function CoachPanel({
     const historyForApi = updatedHistory.map((m) => ({ role: m.role, content: m.content }))
 
     try {
-      // ── Step 1: Safety check + semantic retrieval in parallel ───────────
-      // Build entry excerpts for the retrieve API (first 150 chars each)
-      const entryExcerpts = recentEntries && recentEntries.length > 5
-        ? recentEntries.map((e, i) => ({
-            idx:     i,
-            excerpt: e.slice(0, 150).replace(/\s+/g, " ").trim(),
-          }))
-        : null
-
-      const [safetyResult, retrieveResult] = await Promise.all([
-        // Safety pre-check — regex fast-path handles 99%+ of messages
-        fetch("/api/coach/safety", {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ message: text }),
-        }).then((r) => r.ok ? r.json() : { risk: "safe" }).catch(() => ({ risk: "safe" })),
-
-        // Semantic retrieval — only if we have more entries than the limit
-        entryExcerpts
-          ? fetch("/api/coach/retrieve", {
-              method:  "POST",
-              headers: { "Content-Type": "application/json" },
-              body:    JSON.stringify({ query: text, entries: entryExcerpts }),
-            }).then((r) => r.ok ? r.json() : null).catch(() => null)
-          : Promise.resolve(null),
-      ])
-
-      // ── Step 2: Handle crisis — skip coach entirely ─────────────────────
-      if (safetyResult.risk === "crisis") {
-        const crisisMsg: string = safetyResult.response
-          ?? "Please reach out to a crisis line right now: call or text **988** (US, free, 24/7)."
-        setMessages((prev) => {
-          const last = prev[prev.length - 1]
-          return [...prev.slice(0, -1), { ...last, content: crisisMsg, streaming: false }]
-        })
-        setLoading(false)
-        return
-      }
-
-      const elevated = safetyResult.risk === "elevated"
-
-      // ── Step 3: Select relevant entries ────────────────────────────────
+      let elevated = false
       let relevantEntries: string[] | undefined
-      if (recentEntries && recentEntries.length > 0) {
-        if (retrieveResult?.indices?.length) {
-          // Semantically ranked indices from the API
-          relevantEntries = (retrieveResult.indices as number[])
-            .filter((i) => i >= 0 && i < recentEntries.length)
-            .slice(0, 5)
-            .map((i) => recentEntries[i])
-        } else {
-          // Fallback: client-side keyword scoring
-          relevantEntries = selectRelevantEntriesFallback(recentEntries, text)
+
+      if (refine) {
+        // ── Refine mode: skip safety check + retrieval — go straight to rewrite ──
+        // The "message" is a writing instruction, not a personal disclosure,
+        // so the safety pre-check is not needed here.
+      } else {
+        // ── Step 1: Safety check + semantic retrieval in parallel ───────────
+        const entryExcerpts = recentEntries && recentEntries.length > 5
+          ? recentEntries.map((e, i) => ({
+              idx:     i,
+              excerpt: e.slice(0, 150).replace(/\s+/g, " ").trim(),
+            }))
+          : null
+
+        const [safetyResult, retrieveResult] = await Promise.all([
+          fetch("/api/coach/safety", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ message: text }),
+          }).then((r) => r.ok ? r.json() : { risk: "safe" }).catch(() => ({ risk: "safe" })),
+
+          entryExcerpts
+            ? fetch("/api/coach/retrieve", {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({ query: text, entries: entryExcerpts }),
+              }).then((r) => r.ok ? r.json() : null).catch(() => null)
+            : Promise.resolve(null),
+        ])
+
+        // ── Step 2: Handle crisis — skip coach entirely ─────────────────────
+        if (safetyResult.risk === "crisis") {
+          const crisisMsg: string = safetyResult.response
+            ?? "Please reach out to a crisis line right now: call or text **988** (US, free, 24/7)."
+          setMessages((prev) => {
+            const last = prev[prev.length - 1]
+            return [...prev.slice(0, -1), { ...last, content: crisisMsg, streaming: false }]
+          })
+          setLoading(false)
+          return
+        }
+
+        elevated = safetyResult.risk === "elevated"
+
+        // ── Step 3: Select relevant entries ────────────────────────────────
+        if (recentEntries && recentEntries.length > 0) {
+          if (retrieveResult?.indices?.length) {
+            relevantEntries = (retrieveResult.indices as number[])
+              .filter((i) => i >= 0 && i < recentEntries.length)
+              .slice(0, 5)
+              .map((i) => recentEntries[i])
+          } else {
+            relevantEntries = selectRelevantEntriesFallback(recentEntries, text)
+          }
         }
       }
 
-      // ── Step 4: Stream coach response ───────────────────────────────────
+      // ── Step 4: Stream coach/refine response ────────────────────────────
       const res = await fetch("/api/coach/chat", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -327,6 +338,7 @@ export default function CoachPanel({
           entryContent,
           recentEntries: relevantEntries,
           elevated,
+          mode:          refine ? "refine" : null,
         }),
       })
 
@@ -375,6 +387,7 @@ export default function CoachPanel({
 
   function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // isRefineMode is read inside handleSend via closure — no need to pass explicitly here
     handleSend(input)
   }
 
@@ -419,6 +432,14 @@ export default function CoachPanel({
               style={{ backgroundColor: "var(--color-surface-2)", color: "var(--color-ink-faint)", border: "1px solid var(--color-border)" }}
             >
               Journal context on
+            </span>
+          )}
+          {isRefineMode && (
+            <span
+              className="text-[10px] font-inter px-1.5 py-0.5 rounded-full font-medium"
+              style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 12%, transparent)", color: "var(--color-accent)", border: "1px solid var(--color-accent)" }}
+            >
+              ✦ Writing mode
             </span>
           )}
           {entryId && messages.some((m) => m.saved) && (
@@ -472,6 +493,39 @@ export default function CoachPanel({
                 ? `Hi ${coachContext.displayName} — what's on your mind?`
                 : "What's on your mind?"}
             </p>
+
+            {/* ── Polish Entry card — only shown when there's entry content to work with ── */}
+            {entryContent.trim().length > 30 && (
+              <div>
+                <button
+                  onClick={() => handleSend("Polish my notes into a journal entry", { refine: true })}
+                  disabled={loading}
+                  className="w-full text-left px-4 py-3 rounded-xl transition-all disabled:opacity-50 flex items-start gap-3"
+                  style={{
+                    backgroundColor: "var(--color-surface-2)",
+                    border:          "1px solid var(--color-accent)",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.85" }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = "1" }}
+                >
+                  <span className="mt-0.5 flex-shrink-0" style={{ color: "var(--color-accent)" }}>
+                    <IconSparkles />
+                  </span>
+                  <div>
+                    <p className="text-sm font-inter font-medium" style={{ color: "var(--color-accent)" }}>
+                      Polish entry into journal prose
+                    </p>
+                    <p className="text-xs font-inter mt-0.5" style={{ color: "var(--color-ink-faint)" }}>
+                      Turns your rough notes into a cohesive journal entry
+                    </p>
+                  </div>
+                </button>
+                <p className="text-[10px] font-inter text-center mt-1" style={{ color: "var(--color-ink-faint)" }}>
+                  Your entry text will be sent to Claude to rewrite
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2 justify-center">
               {starterPrompts.map((prompt, i) => (
                 <button
@@ -547,6 +601,27 @@ export default function CoachPanel({
         <div ref={bottomRef} />
       </div>
 
+      {/* ── Polish pill — persistent shortcut when entry has content ────── */}
+      {entryContent.trim().length > 30 && messages.length > 0 && (
+        <div className="px-4 pt-2 flex-shrink-0 flex justify-center">
+          <button
+            onClick={() => handleSend("Re-polish with my latest notes", { refine: true })}
+            disabled={loading}
+            className="text-xs font-inter px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all disabled:opacity-40"
+            style={{
+              border:          "1px solid var(--color-accent)",
+              color:           "var(--color-accent)",
+              backgroundColor: "transparent",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--color-accent) 10%, transparent)" }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent" }}
+          >
+            <IconSparkles />
+            {isRefineMode ? "Re-polish with latest notes" : "Polish entry"}
+          </button>
+        </div>
+      )}
+
       {/* ── Input ────────────────────────────────────────────────────────── */}
       <div
         className="px-4 pb-4 pt-2 border-t flex-shrink-0"
@@ -563,7 +638,7 @@ export default function CoachPanel({
             }}
             onKeyDown={handleKeyDown}
             disabled={loading}
-            placeholder="Ask your coach…"
+            placeholder={isRefineMode ? "Make it shorter, more reflective, change the tone…" : "Ask your coach…"}
             rows={1}
             className="flex-1 px-3 py-2 rounded-xl text-sm font-inter resize-none focus:outline-none focus:ring-2 disabled:opacity-50"
             style={{
