@@ -618,13 +618,13 @@ export default function CoachPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Polish pill — always visible when entry has content ────────── */}
+      {/* ── Polish Entry bar — full-width, always visible when entry has content */}
       {entryContent.trim().length > 30 && (
-        <div className="px-4 pt-2 flex-shrink-0 flex justify-center">
+        <div className="px-4 pt-2 flex-shrink-0">
           <button
             onClick={() => handleSend("Re-polish with my latest notes", { refine: true })}
             disabled={loading}
-            className="text-xs font-inter px-3 py-1.5 rounded-full flex items-center gap-1.5 transition-all disabled:opacity-40"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-inter font-medium transition-all disabled:opacity-40"
             style={{
               border:          "1px solid var(--color-accent)",
               color:           "var(--color-accent)",
@@ -634,7 +634,7 @@ export default function CoachPanel({
             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = "transparent" }}
           >
             <IconSparkles />
-            {isRefineMode ? "Re-polish with latest notes" : "Polish entry"}
+            {isRefineMode ? "Re-polish with latest notes" : "Polish entry into journal prose"}
           </button>
         </div>
       )}

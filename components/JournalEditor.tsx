@@ -30,12 +30,20 @@ function getDictationMimeType(): string {
 function buildGrammarPosMap(doc: any): (offset: number) => number {
   const map: number[] = []
   let textOffset = 0
+  // Tracks the doc position ONE PAST the last character of the most recently
+  // visited text node.  This is used as the sentinel so that when a match's
+  // end offset falls exactly at the boundary of a text node (i.e. the char
+  // *after* the last character), we return the correct "just past text" doc
+  // position rather than a block-boundary or doc.content.size which can
+  // include paragraph close tokens and cause broken replacements.
+  let lastTextEnd = 0
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function walk(node: any, docPos: number, isRoot: boolean) {
     if (node.isText) {
       const str: string = node.text
       for (let i = 0; i < str.length; i++) map[textOffset++] = docPos + i
+      lastTextEnd = docPos + str.length   // one past the last char of this node
       return
     }
     let firstBlock = true
@@ -55,7 +63,10 @@ function buildGrammarPosMap(doc: any): (offset: number) => number {
   }
 
   walk(doc, 0, true)
-  map[textOffset] = doc.content.size   // sentinel for end-of-document
+  // Sentinel: use the tracked end-of-last-text-node position so that a match
+  // that ends exactly at the boundary of the last text node gets a correct `to`
+  // (not doc.content.size which can reach past the paragraph close token).
+  map[textOffset] = lastTextEnd || doc.content.size
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (offset: number) => map[Math.min(Math.max(0, offset), map.length - 1)] ?? (doc as any).content.size
 }
@@ -814,7 +825,10 @@ export default function JournalEditor({
   }
 
   // Apply a single match's top suggestion, then recalculate remaining offsets.
-  // Uses direct ProseMirror insertion to preserve paragraphs and formatting.
+  // Uses a raw ProseMirror transaction (same approach as applyGrammarFix) so that
+  // state.schema.text() creates a bare text node — no block wrapping, no HTML
+  // parsing.  insertContentAt with a plain string was wrapping the replacement in
+  // a <p> tag, which made ProseMirror insert without deleting the original text.
   function applyOneFix(idx: number) {
     if (!grammarResult || !editor) return
     const m = grammarResult.matches[idx]
@@ -828,7 +842,10 @@ export default function JournalEditor({
     const to   = docPos(m.offset + m.length)
 
     if (from < to) {
-      editor.chain().focus().insertContentAt({ from, to }, replacement).run()
+      editor.chain().focus().command(({ tr, state }) => {
+        tr.replaceWith(from, to, state.schema.text(replacement))
+        return true
+      }).run()
     }
 
     // Update remaining match offsets
