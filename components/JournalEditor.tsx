@@ -354,11 +354,15 @@ export default function JournalEditor({
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const editorRef         = useRef<Editor | null>(null)  // stable ref so closures always see latest editor
-  const [isRecording,       setIsRecording]       = useState(false)
-  const [isTranscribing,    setIsTranscribing]    = useState(false)
-  const [dictationAvailable, setDictationAvailable] = useState(false)
-  const [dictationError,    setDictationError]    = useState<string | null>(null)
-  const [recordingSeconds,  setRecordingSeconds]  = useState(0)
+  const [isRecording,          setIsRecording]          = useState(false)
+  const [isTranscribing,       setIsTranscribing]       = useState(false)
+  const [dictationAvailable,   setDictationAvailable]   = useState(false)
+  const [dictationError,       setDictationError]       = useState<string | null>(null)
+  const [recordingSeconds,     setRecordingSeconds]     = useState(0)
+  // Set to true right after transcription completes — shows "Polish Entry" card in the dictation panel
+  const [transcriptionJustDone, setTranscriptionJustDone] = useState(false)
+  // When true, the CoachPanel auto-fires the "Polish Entry" refine flow on mount/update
+  const [pendingRefine,        setPendingRefine]        = useState(false)
 
   // Grammar check
   const [grammarLoading, setGrammarLoading] = useState(false)
@@ -403,6 +407,13 @@ export default function JournalEditor({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-dismiss the "Polish Entry" card after 15 s so it doesn't linger forever
+  useEffect(() => {
+    if (!transcriptionJustDone) return
+    const t = setTimeout(() => setTranscriptionJustDone(false), 15000)
+    return () => clearTimeout(t)
+  }, [transcriptionJustDone])
 
   // Revoke in-memory blob URLs on unmount to free browser memory
   const savedMediaRef = useRef(savedMedia)
@@ -706,6 +717,8 @@ export default function JournalEditor({
         } finally {
           setIsTranscribing(false)
           setRecordingSeconds(0)
+          // Show the "Polish Entry" card in the dictation panel for 15 s
+          setTranscriptionJustDone(true)
         }
       }
 
@@ -737,6 +750,17 @@ export default function JournalEditor({
   function handleDictateClick() {
     if (isRecording) stopDictation()
     else if (!isTranscribing) void startDictation()
+  }
+
+  // Called from the "Polish Entry" button in the dictation panel.
+  // Dismisses the transcription-done card, flags a pending refine, and opens the coach.
+  function handleDictationPolish() {
+    setTranscriptionJustDone(false)
+    setPendingRefine(true)
+    if (onToggleCoach) {
+      if (!showCoach) onToggleCoach()   // open desktop panel
+      setMobileTab("coach")             // switch to coach on mobile
+    }
   }
 
   // ── Grammar check (LanguageTool) ─────────────────────────────────────
@@ -1219,6 +1243,8 @@ export default function JournalEditor({
           entryId={entryId}
           onClose={() => setMobileTab("write")}
           onInsertToEntry={handleInsertToEntry}
+          pendingRefine={pendingRefine}
+          onRefineConsumed={() => setPendingRefine(false)}
         />
       </div>
     )}
@@ -1731,7 +1757,7 @@ export default function JournalEditor({
 
       {/* ── Right-side floating panel: dictation + grammar ───────────────── */}
       {/* Mobile only (md:hidden) — on desktop this content moves into the right panel. */}
-      {(isRecording || isTranscribing || dictationError || grammarResult) && (
+      {(isRecording || isTranscribing || dictationError || grammarResult || transcriptionJustDone) && (
         <div
           className="md:hidden fixed z-[90] right-3 flex flex-col gap-2"
           style={{ top: "7rem", width: 300, maxHeight: "calc(100vh - 8rem)", overflowY: "auto" }}
@@ -1825,6 +1851,34 @@ export default function JournalEditor({
                   Converting speech to text…
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* ── Polish Entry — shown after transcription completes ──────── */}
+          {transcriptionJustDone && !isRecording && !isTranscribing && onToggleCoach && (
+            <div className="rounded-xl overflow-hidden shadow-lg"
+              style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-accent)" }}>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <span className="flex-shrink-0" style={{ color: "var(--color-accent)" }}><IconSparkles /></span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Transcription done</p>
+                  <p className="text-xs font-inter font-medium" style={{ color: "var(--color-ink)" }}>Polish notes into journal prose?</p>
+                </div>
+                <button onClick={() => setTranscriptionJustDone(false)}
+                  className="flex-shrink-0 transition-colors" style={{ color: "var(--color-ink-faint)" }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = "var(--color-ink)"}
+                  onMouseLeave={(e) => e.currentTarget.style.color = "var(--color-ink-faint)"}>
+                  <IconXMark />
+                </button>
+              </div>
+              <button onClick={handleDictationPolish}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-inter font-semibold transition-colors"
+                style={{ color: "var(--color-accent)", borderTop: "1px solid var(--color-border)", backgroundColor: "transparent" }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--color-accent) 10%, transparent)")}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+                <IconSparkles />
+                Open Coach &amp; Polish Entry
+              </button>
             </div>
           )}
 
@@ -2183,13 +2237,13 @@ export default function JournalEditor({
     </div>{/* end editor column */}
 
       {/* ── Desktop right panel — only mounts when something is active ─── */}
-      {(isRecording || isTranscribing || dictationError || grammarResult || (showCoach && onToggleCoach) || showHabits) && (
+      {(isRecording || isTranscribing || dictationError || grammarResult || transcriptionJustDone || (showCoach && onToggleCoach) || showHabits) && (
       <div
         className="hidden md:flex flex-col border-l flex-shrink-0 sticky top-0"
         style={{ width: 360, height: "100vh", borderColor: "var(--color-border)", backgroundColor: "var(--color-surface)" }}
       >
         {/* Grammar / dictation takes over the right panel when active */}
-        {(isRecording || isTranscribing || dictationError || grammarResult) ? (
+        {(isRecording || isTranscribing || dictationError || grammarResult || transcriptionJustDone) ? (
           <div className="flex flex-col gap-2 p-3 overflow-y-auto h-full">
             {/* Header label */}
             <p className="text-[10px] font-inter font-semibold uppercase tracking-widest px-1 mb-1"
@@ -2258,6 +2312,34 @@ export default function JournalEditor({
                   <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Transcribing</p>
                   <p className="text-xs font-inter font-medium" style={{ color: "var(--color-ink)" }}>Converting speech to text…</p>
                 </div>
+              </div>
+            )}
+
+            {/* Polish Entry — shown after transcription completes */}
+            {transcriptionJustDone && !isRecording && !isTranscribing && onToggleCoach && (
+              <div className="rounded-xl overflow-hidden"
+                style={{ backgroundColor: "var(--color-surface-2)", border: "1px solid var(--color-accent)" }}>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <span className="flex-shrink-0" style={{ color: "var(--color-accent)" }}><IconSparkles /></span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-inter font-semibold uppercase tracking-wide mb-0.5" style={{ color: "var(--color-ink-faint)" }}>Transcription done</p>
+                    <p className="text-xs font-inter font-medium" style={{ color: "var(--color-ink)" }}>Polish notes into journal prose?</p>
+                  </div>
+                  <button onClick={() => setTranscriptionJustDone(false)}
+                    className="flex-shrink-0 transition-colors" style={{ color: "var(--color-ink-faint)" }}
+                    onMouseEnter={(e) => e.currentTarget.style.color = "var(--color-ink)"}
+                    onMouseLeave={(e) => e.currentTarget.style.color = "var(--color-ink-faint)"}>
+                    <IconXMark />
+                  </button>
+                </div>
+                <button onClick={handleDictationPolish}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-inter font-semibold transition-colors"
+                  style={{ color: "var(--color-accent)", borderTop: "1px solid var(--color-border)", backgroundColor: "transparent" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "color-mix(in srgb, var(--color-accent) 10%, transparent)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}>
+                  <IconSparkles />
+                  Open Coach &amp; Polish Entry
+                </button>
               </div>
             )}
 
@@ -2373,6 +2455,8 @@ export default function JournalEditor({
             entryId={entryId}
             onClose={onToggleCoach}
             onInsertToEntry={handleInsertToEntry}
+            pendingRefine={pendingRefine}
+            onRefineConsumed={() => setPendingRefine(false)}
           />
         ) : showHabits ? (
           <HabitsPanel />

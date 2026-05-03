@@ -29,12 +29,15 @@ interface Message {
 }
 
 export interface CoachPanelProps {
-  entryContent:    string           // live plain text from editor
-  recentEntries?:  string[]         // decrypted entries (only when privacy toggle ON)
-  coachContext:    CoachContext | null
-  entryId?:        string | null    // persists chat history per entry
-  onClose:         () => void
-  onInsertToEntry: (text: string) => void
+  entryContent:     string           // live plain text from editor
+  recentEntries?:   string[]         // decrypted entries (only when privacy toggle ON)
+  coachContext:     CoachContext | null
+  entryId?:         string | null    // persists chat history per entry
+  onClose:          () => void
+  onInsertToEntry:  (text: string) => void
+  // When true the panel auto-fires "Polish Entry" as soon as it's ready
+  pendingRefine?:   boolean
+  onRefineConsumed?: () => void
 }
 
 // ── Situation → starter prompt ───────────────────────────────────────────
@@ -141,6 +144,8 @@ export default function CoachPanel({
   entryId,
   onClose,
   onInsertToEntry,
+  pendingRefine,
+  onRefineConsumed,
 }: CoachPanelProps) {
   const [messages,      setMessages]      = useState<Message[]>([])
   const [input,         setInput]         = useState("")
@@ -174,6 +179,18 @@ export default function CoachPanel({
       })
       .catch(() => setHistoryLoaded(true))
   }, [entryId])
+
+  // ── Auto-fire "Polish Entry" when triggered from dictation panel ────
+  // pendingRefine is set by the parent (JournalEditor) when the user clicks
+  // "Open Coach & Polish Entry" in the post-transcription card.
+  // We wait until history has loaded so we don't interrupt a loading state.
+  useEffect(() => {
+    if (!pendingRefine || !historyLoaded || loading) return
+    onRefineConsumed?.()
+    handleSend("Polish my notes into a journal entry", { refine: true })
+  // handleSend is stable within the render; pendingRefine + historyLoaded are the real triggers
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRefine, historyLoaded])
 
   // ── Auto-scroll ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -601,8 +618,8 @@ export default function CoachPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Polish pill — persistent shortcut when entry has content ────── */}
-      {entryContent.trim().length > 30 && messages.length > 0 && (
+      {/* ── Polish pill — always visible when entry has content ────────── */}
+      {entryContent.trim().length > 30 && (
         <div className="px-4 pt-2 flex-shrink-0 flex justify-center">
           <button
             onClick={() => handleSend("Re-polish with my latest notes", { refine: true })}
